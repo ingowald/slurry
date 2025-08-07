@@ -8,10 +8,11 @@
 #include "owl/common/math/box.h"
 
 namespace slurry {
-  using owl::common::vec2i;
-  using owl::common::vec3i;
-  using owl::common::vec3f;
-  using owl::common::box3f;
+  using namespace owl::common;
+  // using owl::common::vec2i;
+  // using owl::common::vec3i;
+  // using owl::common::vec3f;
+  // using owl::common::box3f;
   
   namespace faceIteration {
     
@@ -24,18 +25,18 @@ namespace slurry {
     // =============================================================================
 
     struct Context {
+      virtual ~Context() = default;
       static Context *init(int gpuID,
                            size_t sizeOfUserMesh,
                            int numMeshes,
                            size_t userLaunchDataSize,
                            const char *embeddedPtxCode,
                            const char *entryPointName);
-      void finalize();
-      void setMesh(int meshID,
-                   const MeshData  *pUserMeshData);
-      void launch(vec2i launchDims, LaunchData *pLaunchData);
+      virtual void finalize() = 0;
+      virtual void setMesh(int meshID,
+                   const MeshData  *pUserMeshData) = 0;
+      virtual void launch(vec2i launchDims, LaunchData *pLaunchData) = 0;
     };
-
 
 
     // =============================================================================
@@ -59,7 +60,9 @@ namespace slurry {
     };
     
     struct LaunchData {
-      OptixTraversableHandle bvh;
+      struct {
+        OptixTraversableHandle bvh;
+      } faceIt;
     };
 
 #ifdef __CUDACC__

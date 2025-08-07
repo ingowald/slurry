@@ -54,7 +54,7 @@ namespace miniApp {
     prd.fragment.opacity = 0.f;
     prd.fragment.value = 0.f;
     
-    faceIteration::traceFrontToBack(launchData.bvh,
+    faceIteration::traceFrontToBack(launchData.faceIt.bvh,
                                     org,dir,0.f,INFINITY,
                                     prd);
 

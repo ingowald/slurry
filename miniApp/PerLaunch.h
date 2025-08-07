@@ -4,10 +4,14 @@
 
 namespace miniApp {
   using namespace slurry;
-  
+
+  struct UserMeshData : public faceIteration::MeshData {
+    float someDummyValue;
+  };
+
   struct Fragment {
     float depth;
-    float accumulatedValue;
+    float value;
   };
   
   struct PerLaunchData : public faceIteration::LaunchData {
@@ -18,5 +22,10 @@ namespace miniApp {
     int frameID;
     Fragment *d_frameBuffer;
   };
+
+  struct PerRayData {
+    float depth;
+    float accumulatedValue;
+  }
 
 }

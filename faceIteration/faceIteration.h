@@ -17,22 +17,22 @@ namespace slurry {
     
     struct Context;
     struct LaunchData;
-
+    struct MeshData;
+    
     // =============================================================================
     // APP-side interface
     // =============================================================================
   
     Context *init(int gpuID,
+                  size_t sizeOfUserMesh,
                   int numMeshes,
                   size_t userLaunchDataSize,
                   const char *embeddedCode);
     void finalize(Context *ctx);
     void setMesh(int meshID,
-                 const vec3f *vertices, int numVertices,
-                 const vec3i *indices, int numIndices,
-                 const void  *userDataPointerOnGPU = 0);
+                 const MeshData  *pUserMeshData);
     void render(vec2i launchDims, LaunchData *pLaunchData);
-
+    
 
 
 
@@ -40,16 +40,26 @@ namespace slurry {
     // DEVICE programs-side interface
     // =============================================================================
     typedef enum { DONE_TRAVERSING=0, KEEP_TRAVERSING=1 } VisitResult;
-  
-    struct PerRay {
+
+    /*! BASE class for all per-mesh data; it's the user's job to add
+        more stuff if required by subclassing */
+    struct MeshData {
+      vec3f *vertices;
+      vec3i *indices;
+      int numVertices;
+      int numIndices;
+    };
+    
+    struct PerRayData {
       // anything?
     };
+    
     struct LaunchData {
       OptixTraversableHandle bvh;
     };
 
 #ifdef __CUDA_ARCH__
-# define SLURRY_DEFINE_PROGRAMS(perRayPerLaunchFct, perRayPerFaceFct) /* nothing yet */
+# define FACE_ITERATION_DEFINE_PROGRAMS(perRayPerLaunchFct, perRayPerFaceFct) /* nothing yet */
 #endif
   };
 }

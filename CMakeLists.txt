@@ -1,3 +1,6 @@
+# Copyright 2025 Ingo Wald
+# SPDX-License-Identifier: Apache-2.0
+
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0048 NEW)
 project(Slurry VERSION 0.1.0 LANGUAGES C CXX CUDA)

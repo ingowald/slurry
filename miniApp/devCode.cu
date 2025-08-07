@@ -2,35 +2,56 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "faceIteration.h"
+#include "PerLaunch.h"
 
-namespace slurry {
-  
-#if 1
+DECLARE_OPTIX_LAUNCH_PARAMS(miniApp::PerLaunchData);
 
-  struct UserPRD {
-    float accumulatedValue;
-  };
+namespace miniApp {
 
-  /*! this works just like a CUDA kernel, except you cannot specify any paramters */
-  // OPTIX_RAYGEN_PROGRAM(slurryLaunch)()
-  // {
-  
-  // }
-
-
-  inline __device__ faceIteration::VisitResult rayHitsFace(UserPRD &prd)
+  inline __device__ faceIteration::VisitResult rayHitsFace()
   {
+    const UserMesh &mesh = owl::getProgramData<UserMesh>();
+    
+    int primID = optixGetPrimitiveIndex();
+    vec3i idx = mesh.indices[primID];
+    vec3f a = mesh.vertices[idx.x];
+    vec3f b = mesh.vertices[idx.y];
+    vec3f c = mesh.vertices[idx.z];
+    vec3f N = normalize(cross(b-a,c-a));
+    
+    vec3f dir = normalize(optixGetWorldRayDirection());
+    prd.accumulatedValue += mesh.someDummyValue*fabsf(dot(N,dir));
+    
     return faceIteration::KEEP_TRAVERSING;
   }
 
-  inline __device__ void launchOneRay(UserPRD &prd)
+  /*! this works just like a cuda kernel, you just can't directly pass
+      any paramters; they have to go through the "LaunchParams"
+      abstraction */
+  inline __device__ void launchOneRay()
   {
+    vec2i launchIdx = optixGetLaunchIndex();
+    vec2i launchDims = optixGetLaunchDimensions();
+    if (launchIdx.x >= launchDims.x || launchIdx.y >= launchDims.y) return;
+    
+    const PerLaunchData &launchData
+      = /* this is a device global that gets filled in by optix, just use it */
+      optixLaunchParams;
+
+    vec3f org = launchData.camera_org;
+    vec3f dir = normalize(launchData.camera_d00;
+                          + (launchIdx.x+.5f)*launchData.camera_du
+                          + (launchIdx.y+.5f)*launchData.camera_dv);
+    owl::Ray ray(org,dir);
+
+    PerRayData perRayData;
+    owl::traceRay(ray,perRayData);
   }
 
-  SLURRY_DEFINE_PROGRAMS(launchOneRay,rayHitsFace);
+  FACE_ITERATION_DEFINE_PROGRAMS(launchOneRay,rayHitsFace);
 
 
-#else
+#if 0
   struct UserPRD;
   inline __device__ void perFaceUserCode(UserPRD &prd);
 

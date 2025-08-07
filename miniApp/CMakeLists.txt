@@ -1,3 +1,5 @@
+# Copyright 2025 Ingo Wald
+# SPDX-License-Identifier: Apache-2.0
 
 embed_ptx(
   OUTPUT_TARGET      devCode_ptx

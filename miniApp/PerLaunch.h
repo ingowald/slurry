@@ -12,13 +12,20 @@ namespace miniApp {
   struct Fragment {
     float depth;
     float value;
+    float alpha;
+  };
+
+  struct FinalCompositingResult {
+    float value;
   };
   
   struct PerLaunchData : public faceIteration::LaunchData {
-    vec3f camera_org;
-    vec3f camera_d00;
-    vec3f camera_dx;
-    vec3f camera_dy;
+    struct {
+      vec3f org;
+      vec3f dir_00;
+      vec3f dir_dx;
+      vec3f dir_dy;
+    } camera;
     int frameID;
     Fragment *d_frameBuffer;
   };
@@ -26,6 +33,6 @@ namespace miniApp {
   struct PerRayData {
     float depth;
     float accumulatedValue;
-  }
+  };
 
 }

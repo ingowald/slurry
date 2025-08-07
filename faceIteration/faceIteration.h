@@ -22,17 +22,18 @@ namespace slurry {
     // =============================================================================
     // APP-side interface
     // =============================================================================
-  
-    Context *init(int gpuID,
-                  size_t sizeOfUserMesh,
-                  int numMeshes,
-                  size_t userLaunchDataSize,
-                  const char *embeddedCode);
-    void finalize(Context *ctx);
-    void setMesh(int meshID,
-                 const MeshData  *pUserMeshData);
-    void render(vec2i launchDims, LaunchData *pLaunchData);
-    
+
+    struct Context {
+      static Context *init(int gpuID,
+                           size_t sizeOfUserMesh,
+                           int numMeshes,
+                           size_t userLaunchDataSize,
+                           const char *embeddedCode);
+      void finalize();
+      void setMesh(int meshID,
+                   const MeshData  *pUserMeshData);
+      void launch(vec2i launchDims, LaunchData *pLaunchData);
+    };
 
 
 

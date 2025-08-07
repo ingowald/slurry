@@ -1,2 +1,0 @@
-#include "rankCompositing.h"
-

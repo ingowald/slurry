@@ -3,7 +3,7 @@
 #include "owl/owl.h"
 #include <mpi.h>
 
-namespace rankCompositing {
+namespace compositing {
 
   /*! input is a pointer to an array of fragments (of the size the
       user indicated in compy::init) that this kernel is supposed to
@@ -26,16 +26,18 @@ namespace rankCompositing {
                                       int numPixelsThisRank,
                                       int numRanks);
   
-  struct Context;
+  struct Context {
   
-  Context *init(MPI_Comm comm,
-                size_t sizeOfUserInputFragmentType,
-                size_t sizeOfUserOutputFragmentType);
-  
-  /*! resize context, return this rank's local write buffer */
-  void *resize(Context *ctx, int size_x, int size_y);
-
-  /*! run compositing, return final composited read buffer on rank 0,
+    static Context *create(MPI_Comm comm,
+                           size_t sizeOfUserInputFragmentType,
+                           size_t sizeOfUserFinalCompositingResult);
+    
+    /*! resize context, return this rank's local write buffer */
+    void *resize(Context *ctx, int size_x, int size_y);
+    
+    /*! run compositing, return final composited read buffer on rank 0,
       and nullptr on all other ranks */
-  void *run();
-}
+    void *run();
+  };
+  
+} // ::compositing

@@ -32,7 +32,7 @@ set(CMAKE_CUDA_ARCHITECTURES native)
 add_subdirectory(submodules/owl EXCLUDE_FROM_ALL)
 
 add_subdirectory(faceIteration)
-add_subdirectory(rankCompositing)
+add_subdirectory(compositing)
 
 add_subdirectory(miniApp)
 

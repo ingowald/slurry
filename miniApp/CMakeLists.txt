@@ -13,7 +13,7 @@ add_executable(miniApp
   hostCode.cpp
 )
 target_link_libraries(miniApp PUBLIC
-  embedded_devCode-ptx
+  embedded_devCode
   faceIteration
   compositing
   )

@@ -34,5 +34,5 @@ add_subdirectory(submodules/owl EXCLUDE_FROM_ALL)
 add_subdirectory(faceIteration)
 add_subdirectory(compositing)
 
-add_subdirectory(miniApp)
+add_subdirectory(miniApp buildDir_miniApp)
 

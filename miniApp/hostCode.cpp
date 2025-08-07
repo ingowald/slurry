@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 
 /* has to match the name used in the embed_ptx cmake macro used in CMakeFile */
-extern "C" char embedded_devCode[];
+extern "C" const char embedded_devCode_ptx[];
 
 namespace miniApp {
 
@@ -79,7 +79,7 @@ namespace miniApp {
     faceIteration::Context *fit
       = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
                                      sizeof(PerLaunchData),
-                                     embedded_devCode,
+                                     embedded_devCode_ptx,
                                      "launchOneRay");
     setScene(fit,"test.binmesh");
     

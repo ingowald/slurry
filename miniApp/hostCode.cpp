@@ -71,7 +71,7 @@ namespace miniApp {
       = compositing::Context::create(MPI_COMM_WORLD,
                                      sizeof(Fragment),
                                      sizeof(FinalCompositingResult));
-    comp->resize(fbSize.x,fbSize.y);
+    comp->resize(fbSize);
 
     // =============================================================================
     // specify the geometry

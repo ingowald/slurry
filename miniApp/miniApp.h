@@ -12,7 +12,7 @@ namespace miniApp {
   struct Fragment {
     float depth;
     float value;
-    float alpha;
+    float opacity;
   };
 
   struct FinalCompositingResult {
@@ -27,12 +27,11 @@ namespace miniApp {
       vec3f dir_dy;
     } camera;
     int frameID;
-    Fragment *d_frameBuffer;
+    Fragment *d_perRankFragments;
   };
 
-  struct PerRayData {
-    float depth;
-    float accumulatedValue;
+  struct PerRayData : public faceIteration::PerRayData {
+    Fragment fragment;
   };
 
 }

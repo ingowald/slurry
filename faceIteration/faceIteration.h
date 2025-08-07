@@ -28,7 +28,8 @@ namespace slurry {
                            size_t sizeOfUserMesh,
                            int numMeshes,
                            size_t userLaunchDataSize,
-                           const char *embeddedCode);
+                           const char *embeddedPtxCode,
+                           const char *entryPointName);
       void finalize();
       void setMesh(int meshID,
                    const MeshData  *pUserMeshData);
@@ -52,15 +53,67 @@ namespace slurry {
     };
     
     struct PerRayData {
-      // anything?
+      struct {
+        float tHit;
+      } faceIt;
     };
     
     struct LaunchData {
       OptixTraversableHandle bvh;
     };
 
-#ifdef __CUDA_ARCH__
-# define FACE_ITERATION_DEFINE_PROGRAMS(perRayPerLaunchFct, perRayPerFaceFct) /* nothing yet */
+#ifdef __CUDACC__
+    inline __device__
+    void traceFrontToBack(OptixTraversableHandle bvh,
+                          vec3f org, vec3f dir, float t0, float t1,
+                          PerRayData &prd);
+    
+// # define FACE_ITERATION_DEFINE_PROGRAMS(perRayPerLaunchFct, perRayPerFaceFct) /* nothing yet */
 #endif
-  };
+
+
+
+    // #############################################################################
+    // IMPLEMENTATION
+    // #############################################################################
+
+#ifdef __CUDA_ARCH__
+    inline __device__ float justBelow(float f)
+    { return nextafterf(f,-1.f); }
+    inline __device__ float justAbove(float f)
+    { return nextafterf(f,INFINITY); }
+    
+    inline __device__
+    void traceFrontToBack(OptixTraversableHandle tlas,
+                          vec3f org, vec3f dir, float t0, float t1,
+                          PerRayData &prd)
+    {
+      // slurry::PerRay prd = { &userPRD, -1.f };
+      owl::Ray ray;
+      ray.origin = org;
+      ray.direction = dir;
+      ray.tmin = t0;
+      ray.tmax = t1;
+      while (1) {
+        // ------------------------------------------------------------------
+        // first, trace for ONLY closest hit - this will return the
+        // distance, or -1 in faceIt.tHit
+        // ------------------------------------------------------------------
+        prd.faceIt.tHit = -1.f; // mark as invalid
+        ray.tmax = t1;
+        owl::traceRay(tlas,ray,prd,OPTIX_RAY_FLAG_DISABLE_ANYHIT);
+        if (prd.faceIt.tHit < 0.f)
+          // no more surface(s) until ray_tmax
+          break;
+    
+        ray.tmin = justBelow(prd.faceIt.tHit);
+        ray.tmax = justAbove(prd.faceIt.tHit);
+        owl::traceRay(tlas,ray,prd,OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT);
+      
+        ray.tmin = prd.faceIt.tHit;
+      }
+  }
+    
+#endif
+  }
 }

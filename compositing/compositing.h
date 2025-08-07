@@ -33,7 +33,7 @@ namespace compositing {
                            size_t sizeOfUserFinalCompositingResult);
     
     /*! resize context, return this rank's local write buffer */
-    void *resize(Context *ctx, int size_x, int size_y);
+    void *resize(int size_x, int size_y);
     
     /*! run compositing, return final composited read buffer on rank 0,
       and nullptr on all other ranks */

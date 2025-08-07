@@ -1,13 +1,14 @@
 
-#include "rankCompositing.h"
-#include "PerLaunch.h"
+#include "compositing.h"
+#include "miniApp.h"
+#include <cuda_runtime.h>
 
 /* has to match the name used in the embed_ptx cmake macro used in CMakeFile */
-extern "C" char devCode_ptx[];
+extern "C" char embedded_devCode[];
 
 namespace miniApp {
 
-  vec2i fbSize;
+  vec2i fbSize { 800, 600 };
   struct {
     vec3f from { 0, 0, -1 };
     vec3f at   { 0, 0, 0 };
@@ -18,14 +19,14 @@ namespace miniApp {
   void setCamera(PerLaunchData &launchData)
   {
     /* vvvv all stolen from pete shirley's RTOW */
-    const float vfov = fovy;
+    const float vfov = camera.fovy;
     const vec3f vup = camera.up;
     const float aspect = fbSize.x / float(fbSize.y);
     const float theta = vfov * ((float)M_PI) / 180.0f;
     const float half_height = tanf(theta / 2.0f);
     const float half_width = aspect * half_height;
     const float focusDist = 10.f;
-    const vec3f origin = lookFrom;
+    const vec3f origin = camera.from;
     const vec3f w = normalize(camera.from - camera.at);
     const vec3f u = normalize(cross(vup, w));
     const vec3f v = cross(w, u);
@@ -37,9 +38,13 @@ namespace miniApp {
 
     launchData.camera.org = origin;
     launchData.camera.dir_00 = lower_left_corner;
-    launchData.camera.dir_du = horizontal / fbSize.x;
-    launchData.camera.dir_dv = vertical / fbSize.y;
+    launchData.camera.dir_dx = horizontal / fbSize.x;
+    launchData.camera.dir_dy = vertical / fbSize.y;
   }
+
+
+  void setScene(faceIteration::Context *fit,
+                const char *fileName);
   
   extern "C" int main(int ac, char **av)
   {
@@ -72,10 +77,11 @@ namespace miniApp {
     // specify the geometry
     // =============================================================================
     faceIteration::Context *fit
-      = faceIteration::Context::init(gpuID,sizeof(UserMesh),1,
+      = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
                                      sizeof(PerLaunchData),
-                                     devCode_ptx);
-    setScene("test.binmesh");
+                                     embedded_devCode,
+                                     "launchOneRay");
+    setScene(fit,"test.binmesh");
     
     // =============================================================================
     // set up a launch

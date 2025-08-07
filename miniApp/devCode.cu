@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "faceIteration.h"
-#include "PerLaunch.h"
+#include "miniApp.h"
 
 DECLARE_OPTIX_LAUNCH_PARAMS(miniApp::PerLaunchData);
 
 namespace miniApp {
-
+  
   inline __device__ faceIteration::VisitResult rayHitsFace()
   {
-    const UserMesh &mesh = owl::getProgramData<UserMesh>();
+    const UserMeshData &mesh = owl::getProgramData<UserMeshData>();
+    PerRayData &prd = owl::getPRD<PerRayData>();
     
     int primID = optixGetPrimitiveIndex();
     vec3i idx = mesh.indices[primID];
@@ -19,39 +20,52 @@ namespace miniApp {
     vec3f c = mesh.vertices[idx.z];
     vec3f N = normalize(cross(b-a,c-a));
     
-    vec3f dir = normalize(optixGetWorldRayDirection());
-    prd.accumulatedValue += mesh.someDummyValue*fabsf(dot(N,dir));
+    vec3f dir = optixGetWorldRayDirection();
+    dir = normalize(dir);
+    prd.fragment.depth = min(prd.fragment.depth,optixGetRayTmax());
+    float oldOpacity = prd.fragment.opacity;
+    float thisOpacity = .1f;
     
+    prd.fragment.value += (1.f-oldOpacity)*thisOpacity*mesh.someDummyValue*fabsf(dot(N,dir));
+    prd.fragment.opacity += (1.f-oldOpacity)*thisOpacity;
+      
     return faceIteration::KEEP_TRAVERSING;
   }
 
   /*! this works just like a cuda kernel, you just can't directly pass
       any paramters; they have to go through the "LaunchParams"
       abstraction */
-  inline __device__ void launchOneRay()
+  OPTIX_RAYGEN_PROGRAM(launchOneRay)()
   {
-    vec2i launchIdx = optixGetLaunchIndex();
-    vec2i launchDims = optixGetLaunchDimensions();
+    vec3i launchIdx = optixGetLaunchIndex();
+    vec3i launchDims = optixGetLaunchDimensions();
     if (launchIdx.x >= launchDims.x || launchIdx.y >= launchDims.y) return;
     
     const PerLaunchData &launchData
       = /* this is a device global that gets filled in by optix, just use it */
       optixLaunchParams;
 
-    vec3f org = launchData.camera_org;
-    vec3f dir = normalize(launchData.camera_d00;
-                          + (launchIdx.x+.5f)*launchData.camera_du
-                          + (launchIdx.y+.5f)*launchData.camera_dv);
-    owl::Ray ray(org,dir);
+    vec3f org = launchData.camera.org;
+    vec3f dir = normalize(launchData.camera.dir_00
+                          + (launchIdx.x+.5f)*launchData.camera.dir_dx
+                          + (launchIdx.y+.5f)*launchData.camera.dir_dy);
+    PerRayData prd;
+    prd.fragment.depth = INFINITY;
+    prd.fragment.opacity = 0.f;
+    prd.fragment.value = 0.f;
+    
+    faceIteration::traceFrontToBack(launchData.bvh,
+                                    org,dir,0.f,INFINITY,
+                                    prd);
 
-    PerRayData perRayData;
-    owl::traceRay(ray,perRayData);
+    launchData.d_perRankFragments[launchIdx.x+launchDims.x*launchIdx.y]
+      = prd.fragment;
   }
 
-  FACE_ITERATION_DEFINE_PROGRAMS(launchOneRay,rayHitsFace);
 
 
 #if 0
+  FACE_ITERATION_DEFINE_PROGRAMS(launchOneRay,rayHitsFace);
   struct UserPRD;
   inline __device__ void perFaceUserCode(UserPRD &prd);
 

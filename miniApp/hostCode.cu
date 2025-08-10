@@ -1,13 +1,16 @@
+// Copyright 2025 Ingo Wald
+// SPDX-License-Identifier: Apache-2.0
 
 #include "compositing.h"
 #include "miniApp.h"
 #include <cuda_runtime.h>
 
 /* has to match the name used in the embed_ptx cmake macro used in CMakeFile */
-extern "C" const char embedded_devCode_ptx[];
+extern "C" const char devCode_ptx[];
 
 namespace miniApp {
 
+  typedef compositing::Context<Fragment,FinalCompositingResult> CompositingContext;
   vec2i fbSize { 800, 600 };
   struct {
     vec3f from { 0, 0, -1 };
@@ -42,11 +45,37 @@ namespace miniApp {
     launchData.camera.dir_dy = vertical / fbSize.y;
   }
 
+  __global__ void g_localCompositing(FinalCompositingResult *results,
+                                     const Fragment *fragments_allRanksMyPixels,
+                                     int numPixels,
+                                     int numRanks)
+  {
+    int tid = threadIdx.x+blockIdx.x*blockDim.x;
+    if (tid >= numPixels) return;
+    
+    const Fragment *myFragments = fragments_allRanksMyPixels + tid * numRanks;
+    FinalCompositingResult *myResult = results+tid;
+    myResult->value = 0.f;
+    for (int depth=0;depth<numRanks;depth++)
+      myResult->value += myFragments[depth].value;
+  }
+  
+
+  void localCompositing(FinalCompositingResult *results,
+                        const Fragment *fragments,
+                        int numPixels,
+                        int numRanks)
+  {
+    int bs = 128;
+    int nb = divRoundUp(numPixels,bs);
+    g_localCompositing<<<nb,bs>>>(results,fragments,numPixels,numRanks);
+  }
+  
 
   void setScene(faceIteration::Context *fit,
                 const char *fileName);
-  
-  extern "C" int main(int ac, char **av)
+
+  int main(int ac, char **av)
   {
     // =============================================================================
     // init GPU - probably need to do some cleverness to figure ouw
@@ -67,10 +96,9 @@ namespace miniApp {
     // =============================================================================
     // initialize out compositing context
     // =============================================================================
-    compositing::Context *comp
-      = compositing::Context::create(MPI_COMM_WORLD,
-                                     sizeof(Fragment),
-                                     sizeof(FinalCompositingResult));
+    CompositingContext *comp
+      = new CompositingContext(MPI_COMM_WORLD,
+                               localCompositing);
     comp->resize(fbSize);
 
     // =============================================================================
@@ -79,7 +107,7 @@ namespace miniApp {
     faceIteration::Context *fit
       = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
                                      sizeof(PerLaunchData),
-                                     embedded_devCode_ptx,
+                                     devCode_ptx,
                                      "launchOneRay");
     setScene(fit,"test.binmesh");
     

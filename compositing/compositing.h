@@ -1,47 +1,223 @@
+// Copyright 2025 Ingo Wald
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <owl/common/math/vec.h>
 #include <mpi.h>
+#include <vector>
+#include <cuda_runtime.h>
 
 namespace slurry {
   namespace compositing {
-    using owl::common::vec2i;
-    
-    /*! input is a pointer to an array of fragments (of the size the
-      user indicated in compy::init) that this kernel is supposed to
-      composite; sorted by pixel (first) and depth (second). The array
-      contains `numPixelsThisRank*numRanks`, first all numRanks
-      fragments for the first pixel (sorted by depth), then those for
-      the second pixel, etc.
+    using namespace owl::common;
 
-      Ie, assuming the user internally uses a "struct UserFragment", a
-      given cuda thread `threadIdx` would find all its fragments as
-      `((UserFragment*)inputFragments)[threadIdx*numPixelsOnThisRank+i],
-      for i=0..numRanks, in front-to-back order
-    */
-    typedef void (*userCompositeKernel)(void *outputFragments,
-                                        /*! one input fragment per pixel
-                                          on this rank per rank in the
-                                          scene, already sorted by
-                                          depth */
-                                        const void *inputFragments,
-                                        int numPixelsThisRank,
-                                        int numRanks);
-  
+    template<typename FragmentT, typename ResultT>
     struct Context {
-      virtual ~Context() = default;
+      Context(MPI_Comm comm,
+              /*! user-provided kernel that can composite a range of
+                pixels' worth of fragments. input is a array of
+                fragments with 'numPixelsThisRank' pixels, and
+                'numRanks' fragments per pixel; order is first all
+                numRanks fragments for the first pixel (sorted by
+                depth), then those for the second pixel, etc.
+              */
+              void (*userCompositeKernel)(ResultT *outputFragments,
+                                          /*! one input fragment per pixel on
+                                            this rank per rank in the scene,
+                                            already sorted by depth */
+                                          const FragmentT *inputFragments,
+                                          int numPixelsThisRank,
+                                          int numRanks)
+              );
+      ~Context();
       
-      static Context *create(MPI_Comm comm,
-                             size_t sizeOfUserInputFragmentType,
-                             size_t sizeOfUserFinalCompositingResult);
-    
       /*! resize context, return this rank's local write buffer */
-      virtual void *resize(vec2i newSize) = 0;
-    
+      FragmentT *resize(vec2i newSize);
+      
       /*! run compositing, return final composited read buffer on rank 0,
         and nullptr on all other ranks */
-      virtual void *run() = 0;
+      ResultT *run();
+      
+      struct {
+        MPI_Comm comm;
+        int rank = -1;
+        int size = -1;
+      } mpi;
+              /*! user-provided kernel that can composite a range of
+                pixels' worth of fragments. input is a array of
+                fragments with 'numPixelsThisRank' pixels, and
+                'numRanks' fragments per pixel; order is first all
+                numRanks fragments for the first pixel (sorted by
+                depth), then those for the second pixel, etc.
+              */
+      void (*userCompositeKernel)(ResultT *outputFragments,
+                                  const FragmentT *inputFragments,
+                                  int numPixelsThisRank,
+                                  int numRanks) = nullptr;
+      vec2i fbSize{-1,-1};
+      int my_begin = -1;
+      int my_end = -1;
+      int numPixelsInFrame   = -1;
+      FragmentT *myFragments  = 0;
+      FragmentT *allFragments = 0;
+      uint64_t  *sortKeys     = 0;
+      ResultT   *localResults = 0;
+      ResultT   *finalResults = 0;
     };
-  
+
+    // =============================================================================
+    // IMPLEMENTATION
+    // =============================================================================
+    
+    template<typename FragmentT, typename ResultT>
+    Context<FragmentT,ResultT>::Context
+    (MPI_Comm comm,
+     void (*userCompositeKernel)(ResultT *outputFragments,
+                                 /*! one input fragment per pixel on
+                                   this rank per rank in the scene,
+                                   already sorted by depth */
+                                 const FragmentT *inputFragments,
+                                 int numPixelsThisRank,
+                                 int numRanks)
+     )
+      : userCompositeKernel(userCompositeKernel)
+    {
+      mpi.comm = comm;
+      MPI_Comm_rank(mpi.comm,&mpi.rank);
+      MPI_Comm_size(mpi.comm,&mpi.size);
+    }
+
+    template<typename FragmentT, typename ResultT>
+    Context<FragmentT,ResultT>::~Context()
+    {
+      if (allFragments) cudaFree(allFragments);
+      if (myFragments) cudaFree(myFragments);
+      if (sortKeys) cudaFree(sortKeys);
+      if (localResults) cudaFree(localResults);
+      if (finalResults) cudaFree(finalResults);
+    }
+
+    /*! resize context, return this rank's local write buffer */
+    template<typename FragmentT, typename ResultT>
+    FragmentT *Context<FragmentT,ResultT>::resize(vec2i newSize)
+    {
+      this->fbSize = newSize;
+      numPixelsInFrame = fbSize.x*fbSize.y;
+      this->my_begin = numPixelsInFrame * (mpi.rank+0) / mpi.size;
+      this->my_end   = numPixelsInFrame * (mpi.rank+1) / mpi.size;
+      
+      if (allFragments) cudaFree(allFragments);
+      if (localResults) cudaFree(localResults);
+      if (finalResults) cudaFree(finalResults);
+      if (myFragments)  cudaFree(myFragments);
+      if (sortKeys)     cudaFree(sortKeys);
+
+      // ------------------------------------------------------------------
+      // INPUT fragments are one per pixel
+      cudaMalloc((void **)&myFragments, (fbSize.x*fbSize.y)*sizeof(FragmentT));
+
+      // ------------------------------------------------------------------
+      // COMPOSITING inputs (after DPS) is my my_begin...my_end range...
+
+      // ... sort keys is one per mine per rank
+      cudaMalloc((void **)&sortKeys,    (my_end-my_begin)*mpi.size*sizeof(uint64_t));
+      // ... received fragments si one per mine per rank
+      cudaMalloc((void **)&allFragments,(my_end-my_begin)*mpi.size*sizeof(FragmentT));
+      // ... local results is one per mine, period
+      cudaMalloc((void **)&localResults,(my_end-my_begin)*sizeof(ResultT));
+      
+      
+      // ------------------------------------------------------------------
+      // FINAL result is one per pixel
+      if (mpi.rank == 0)
+        cudaMalloc((void **)&finalResults,fbSize.x*fbSize.y*sizeof(ResultT));
+      
+      return myFragments;
+    }
+    
+    template<typename FragmentT, typename ResultT>
+    ResultT *Context<FragmentT,ResultT>::run()
+    {
+      // =============================================================================
+      // gather all the fragments for my_begin..my_range, from every rank
+      // =============================================================================
+      void *sendBuf = myFragments;
+      void *recvBuf = allFragments;
+      std::vector<int> sendOffsets(mpi.size);
+      std::vector<int> sendCounts(mpi.size);
+      std::vector<int> recvOffsets(mpi.size);
+      std::vector<int> recvCounts(mpi.size);
+      for (int r=0;r<mpi.size;r++) {
+        int r_begin = (r+0) * numPixelsInFrame / mpi.size;
+        int r_end   = (r+1) * numPixelsInFrame / mpi.size;
+        sendOffsets[r] = r_begin * sizeof(FragmentT);
+        sendCounts[r]  = (r_end-r_begin) * sizeof(FragmentT);
+
+        recvOffsets[r] = (my_end-my_begin) * r * sizeof(FragmentT);
+        recvCounts[r] = (my_end-my_begin) * sizeof(FragmentT);
+      }
+      Alltoallv(sendBuf,
+                (const int*)sendCounts.data(),
+                (const int*)sendOffsets.data(),
+                MPI_BYTE,
+                recvBuf,
+                (const int*)recvCounts.data(),
+                (const int*)recvOffsets.data(),
+                MPI_BYTE,
+                mpi.comm);
+
+      
+      // =============================================================================
+      // sort these fragments by pixel ID and depth
+      // =============================================================================
+      int numWorkItems = (my_end-my_begin)*mpi.size;
+      int bs = 1024;
+      int nb = divRoundUp(numWorkItems,bs);
+      g_generateKeys<nb,bs>(sortKeys,allFragments,my_end-my_begin,mpi.size);
+      sort(sortKeys,allFragments,numWorkItems);
+
+      // =============================================================================
+      // let user composite these fragments, and turn then into results
+      // =============================================================================
+      userCompositingKernel(localResults,allFragments,my_end-my_begin,mpi.size);
+      cudaStreamSynchronize(0);
+
+      // =============================================================================
+      // and gather them all at rank 0
+      // =============================================================================
+      sendBuf = localResults;
+      recvBuf
+        = (mpi.rank == 0)
+        ? /* the actual results */finalResults
+        : /* anything that's not null */localResults;
+      for (int r=0;r<mpi.size;r++) {
+        if (mpi.rank == 0) {
+          int r_begin = (r+0) * numPixelsInFrame / mpi.size;
+          int r_end   = (r+1) * numPixelsInFrame / mpi.size;
+          recvOffsets[r] = r_begin * sizeof(ResultT);
+          recvCounts[r]  = (r_end-r_begin) * sizeof(ResultT);
+        } else {
+          recvOffsets[r] = 0;
+          recvCounts[r] = 0;
+        };
+        sendOffsets[r] = 0;
+        sendCounts[r]
+          = (r == 0)
+          ? (my_end-my_begin)*sizeof(ResultT)
+          : 0;
+      }
+      Alltoallv(sendBuf,
+                (const int*)sendCounts.data(),
+                (const int*)sendOffsets.data(),
+                MPI_BYTE,
+                recvBuf,
+                (const int*)recvCounts.data(),
+                (const int*)recvOffsets.data(),
+                MPI_BYTE,
+                mpi.comm);
+      return finalResults;
+    }
+    
   } // ::slurry::compositing
 } // ::slurry

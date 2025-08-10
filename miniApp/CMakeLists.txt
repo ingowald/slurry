@@ -10,7 +10,7 @@ embed_ptx(
 
 add_executable(miniApp
   miniApp.h
-  hostCode.cpp
+  hostCode.cu
 )
 target_link_libraries(miniApp PUBLIC
   faceIteration

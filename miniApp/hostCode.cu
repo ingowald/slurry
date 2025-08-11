@@ -99,7 +99,7 @@ namespace miniApp {
     CompositingContext *comp
       = new CompositingContext(MPI_COMM_WORLD,
                                localCompositing);
-    comp->resize(fbSize);
+    Fragment *localFB = comp->resize(fbSize);
 
     // =============================================================================
     // specify the geometry
@@ -112,13 +112,19 @@ namespace miniApp {
     setScene(fit,"test.binmesh");
     
     // =============================================================================
-    // set up a launch
+    // set up a launch, and issue launch to render local frame buffer
     // =============================================================================
     PerLaunchData launchData;
+    launchData.localFB = localFB;
     setCamera(launchData);
+    fit->launch(fbSize,&launchData);
 
 
-
+    // =============================================================================
+    // composite the local frame buffers
+    // =============================================================================
+    FinalCompositingResult *composited
+      = comp->run();
     
 
     // =============================================================================

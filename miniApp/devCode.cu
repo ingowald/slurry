@@ -58,7 +58,7 @@ namespace miniApp {
                                     org,dir,0.f,INFINITY,
                                     prd);
 
-    launchData.d_perRankFragments[launchIdx.x+launchDims.x*launchIdx.y]
+    launchData.localFB[launchIdx.x+launchDims.x*launchIdx.y]
       = prd.fragment;
   }
 

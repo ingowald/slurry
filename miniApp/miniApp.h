@@ -27,7 +27,7 @@ namespace miniApp {
       vec3f dir_dy;
     } camera;
     int frameID;
-    Fragment *d_perRankFragments;
+    Fragment *localFB;
   };
 
   struct PerRayData : public faceIteration::PerRayData {

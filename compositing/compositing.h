@@ -7,6 +7,7 @@
 #include <mpi.h>
 #include <vector>
 #include <cuda_runtime.h>
+#include <cub/cub.cuh>
 
 namespace slurry {
   namespace compositing {
@@ -136,6 +137,58 @@ namespace slurry {
       return myFragments;
     }
     
+    template<typename FragmentT>
+    void sortFragments(uint64_t *keys, FragmentT *fragments, size_t numFragments)
+    {
+      // Determine temporary device storage requirements
+      void     *d_temp_storage = nullptr;
+      size_t   temp_storage_bytes = 0;
+      uint64_t *d_keys_in = keys;
+      uint64_t *d_keys_out = 0;
+      cudaMalloc((void**)&d_keys_out,numFragments*sizeof(uint64_t));
+      FragmentT *d_values_in = fragments;
+      FragmentT *d_values_out = 0;
+      cudaMalloc((void**)&d_values_out,numFragments*sizeof(FragmentT));
+      
+      int num_items = numFragments;
+      cub::DeviceRadixSort::SortPairs
+        (d_temp_storage, temp_storage_bytes,
+         d_keys_in, d_keys_out, d_values_in, d_values_out, num_items);
+
+      // Allocate temporary storage
+      cudaMalloc(&d_temp_storage, temp_storage_bytes);
+
+      // Run sorting operation
+      cub::DeviceRadixSort::SortPairs
+        (d_temp_storage, temp_storage_bytes,
+         d_keys_in, d_keys_out, d_values_in, d_values_out, num_items);
+      cudaMemcpy(d_values_in,d_values_out,numFragments*sizeof(FragmentT),
+                 cudaMemcpyDefault);
+      cudaFree(d_keys_out);
+      cudaFree(d_values_out);
+      cudaFree(d_temp_storage);
+    }
+    
+      
+    template<typename FragmentT>
+    void g_generateKeys(uint64_t *sortKeys,
+                        FragmentT *fragments,
+                        int numFragsThisRank,
+                        int numRanks)
+    {
+      int tid = threadIdx.x+blockIdx.x*blockDim.x;
+      if (tid >= numRanks*numFragsThisRank) return;
+
+      int pixelID = tid % numFragsThisRank;
+      int rank = tid / numFragsThisRank;
+
+      uint64_t key
+        = (uint64_t(pixelID) << 32)
+        | uint64_t(float_as_uint(fragments[tid].depth))
+        ;
+      sortKeys[tid] = key;
+    }
+    
     template<typename FragmentT, typename ResultT>
     ResultT *Context<FragmentT,ResultT>::run()
     {
@@ -157,15 +210,15 @@ namespace slurry {
         recvOffsets[r] = (my_end-my_begin) * r * sizeof(FragmentT);
         recvCounts[r] = (my_end-my_begin) * sizeof(FragmentT);
       }
-      Alltoallv(sendBuf,
-                (const int*)sendCounts.data(),
-                (const int*)sendOffsets.data(),
-                MPI_BYTE,
-                recvBuf,
-                (const int*)recvCounts.data(),
-                (const int*)recvOffsets.data(),
-                MPI_BYTE,
-                mpi.comm);
+      MPI_Alltoallv(sendBuf,
+                    (const int*)sendCounts.data(),
+                    (const int*)sendOffsets.data(),
+                    MPI_BYTE,
+                    recvBuf,
+                    (const int*)recvCounts.data(),
+                    (const int*)recvOffsets.data(),
+                    MPI_BYTE,
+                    mpi.comm);
 
       
       // =============================================================================
@@ -174,8 +227,9 @@ namespace slurry {
       int numWorkItems = (my_end-my_begin)*mpi.size;
       int bs = 1024;
       int nb = divRoundUp(numWorkItems,bs);
+      void *sortKeys;
       g_generateKeys<nb,bs>(sortKeys,allFragments,my_end-my_begin,mpi.size);
-      sort(sortKeys,allFragments,numWorkItems);
+      sortFragments(sortKeys,allFragments,numWorkItems);
 
       // =============================================================================
       // let user composite these fragments, and turn then into results

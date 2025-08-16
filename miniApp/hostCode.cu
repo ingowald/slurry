@@ -70,7 +70,31 @@ namespace miniApp {
     int nb = divRoundUp(numPixels,bs);
     g_localCompositing<<<nb,bs>>>(results,fragments,numPixels,numRanks);
   }
-  
+
+
+  void createModel(std::vector<vec3f> &myRectPositions,
+                   float &rectSize,
+                   int numRanks)
+  {
+    size_t FNV_PRIME = 0x00000100000001b3ull;
+
+    float rectOffset = -1.f;
+    float rectSpacing = 2.f/numRanks;
+    rectSize = 1.f / numRanks;
+    
+    float shiftPerDepth = .8f / numRanks;
+
+    for (int z=0;z<numRanks;z++)
+      for (int y=0;y<numRanks;y++)
+        for (int x=0;x<numRanks;x++) {
+          size_t hash = 0x12345;
+          hash = hash * FNV_PRIME ^ (x+123);
+          hash = hash * FNV_PRIME ^ (y+456);
+          int owner = (z + hash) % numRanks;
+          if (owner == thisRank)
+        }
+    for (int i=0;i
+  }
 
   void setScene(faceIteration::Context *fit,
                 const char *fileName);

@@ -62,7 +62,7 @@ namespace slurry {
       int numPixelsInFrame   = -1;
       FragmentT *myFragments  = 0;
       FragmentT *allFragments = 0;
-      uint64_t  *sortKeys     = 0;
+      // uint64_t  *sortKeys     = 0;
       ResultT   *localResults = 0;
       ResultT   *finalResults = 0;
     };
@@ -94,7 +94,7 @@ namespace slurry {
     {
       if (allFragments) cudaFree(allFragments);
       if (myFragments) cudaFree(myFragments);
-      if (sortKeys) cudaFree(sortKeys);
+      // if (sortKeys) cudaFree(sortKeys);
       if (localResults) cudaFree(localResults);
       if (finalResults) cudaFree(finalResults);
     }
@@ -112,7 +112,7 @@ namespace slurry {
       if (localResults) cudaFree(localResults);
       if (finalResults) cudaFree(finalResults);
       if (myFragments)  cudaFree(myFragments);
-      if (sortKeys)     cudaFree(sortKeys);
+      // if (sortKeys)     cudaFree(sortKeys);
 
       // ------------------------------------------------------------------
       // INPUT fragments are one per pixel
@@ -122,7 +122,7 @@ namespace slurry {
       // COMPOSITING inputs (after DPS) is my my_begin...my_end range...
 
       // ... sort keys is one per mine per rank
-      cudaMalloc((void **)&sortKeys,    (my_end-my_begin)*mpi.size*sizeof(uint64_t));
+      // cudaMalloc((void **)&sortKeys,    (my_end-my_begin)*mpi.size*sizeof(uint64_t));
       // ... received fragments si one per mine per rank
       cudaMalloc((void **)&allFragments,(my_end-my_begin)*mpi.size*sizeof(FragmentT));
       // ... local results is one per mine, period
@@ -164,6 +164,7 @@ namespace slurry {
          d_keys_in, d_keys_out, d_values_in, d_values_out, num_items);
       cudaMemcpy(d_values_in,d_values_out,numFragments*sizeof(FragmentT),
                  cudaMemcpyDefault);
+      cudaStreamSynchronize(0);
       cudaFree(d_keys_out);
       cudaFree(d_values_out);
       cudaFree(d_temp_storage);
@@ -231,7 +232,9 @@ namespace slurry {
       uint64_t *sortKeys;
       cudaMalloc((void**)&sortKeys,numWorkItems*sizeof(uint64_t));
       g_generateKeys<<<nb,bs>>>(sortKeys,allFragments,my_end-my_begin,mpi.size);
+      cudaStreamSynchronize(0);
       sortFragments(sortKeys,allFragments,numWorkItems);
+      cudaStreamSynchronize(0);
       cudaFree(sortKeys);
       // =============================================================================
       // let user composite these fragments, and turn then into results
@@ -263,6 +266,17 @@ namespace slurry {
           ? (my_end-my_begin)*sizeof(ResultT)
           : 0;
       }
+      // printf("rank %i/%i sz %i send %i@%i %i@%i recv %i@%i %i@%i\n",
+      //        mpi.rank,mpi.size,
+      //        (int)sizeof(ResultT),
+      //        sendCounts[0]/(int)sizeof(ResultT),
+      //        sendOffsets[0]/(int)sizeof(ResultT),
+      //        sendCounts[1]/(int)sizeof(ResultT),
+      //        sendOffsets[1]/(int)sizeof(ResultT),
+      //        recvCounts[0]/(int)sizeof(ResultT),
+      //        recvOffsets[0]/(int)sizeof(ResultT),
+      //        recvCounts[1]/(int)sizeof(ResultT),
+      //        recvOffsets[1]/(int)sizeof(ResultT));
       MPI_Alltoallv(sendBuf,
                 (const int*)sendCounts.data(),
                 (const int*)sendOffsets.data(),

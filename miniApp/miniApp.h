@@ -28,7 +28,8 @@ namespace miniApp {
       vec3f org_dv;
       vec3f dir;
     } camera;
-    int frameID;
+    // only for debugging/illustration
+    int rank;
     Fragment *localFB;
   };
 

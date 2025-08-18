@@ -30,7 +30,7 @@ namespace miniApp {
   {
     const UserMeshData &mesh = owl::getProgramData<UserMeshData>();
     PerRayData &prd = owl::getPRD<PerRayData>();
-    
+
     int primID = optixGetPrimitiveIndex();
     vec3i idx = mesh.indices[primID];
     vec3f a = mesh.vertices[idx.x];
@@ -48,10 +48,10 @@ namespace miniApp {
     prd.fragment.color   += (1.f-prd.fragment.opacity)*opacity*color;
     prd.fragment.opacity += (1.f-prd.fragment.opacity)*opacity;
 
-    if (prd.dbg) {
-      printf("depth %f\n",prd.fragment.depth);
-      printf("color %f %f %f\n",color.x,color.y,color.z);
-    }
+    // if (prd.dbg) {
+    //   printf("depth %f\n",prd.fragment.depth);
+    //   printf("color %f %f %f\n",color.x,color.y,color.z);
+    // }
     return faceIteration::KEEP_TRAVERSING;
   }
   FACEIT_PER_FACE_FUNCTION(faceIterationCallback);
@@ -88,7 +88,10 @@ namespace miniApp {
                                     org,dir,0.f,INFINITY,
                                     prd);
 
-    launchData.localFB[launchIdx.x+launchDims.x*launchIdx.y]
+    // prd.fragment.color.x = launchIdx.x;
+    // prd.fragment.color.y = launchIdx.y;
+    // prd.fragment.color.z = launchData.rank;
+    launchData.localFB[launchIdx.x+launchIdx.y*launchDims.x]
       = prd.fragment;
   }
 

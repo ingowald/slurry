@@ -13,36 +13,12 @@
 extern "C" const char devCode_ptx[];
 
 namespace miniApp {
-
+  
   typedef compositing::Context<Fragment,FinalCompositingResult> CompositingContext;
-  vec2i fbSize { 800, 600 };
-  // struct {
-  //   vec3f from { 0, 0, -1 };
-  //   vec3f at   { 0, 0, 0 };
-  //   vec3f up   { 0, 1, 0 };
-  //   float fovy = 20.f;
-  // } camera;
+  vec2i fbSize { 800, 800 };
 
   void setCamera(PerLaunchData &launchData)
   {
-    /* vvvv all stolen from pete shirley's RTOW */
-    // const float vfov = camera.fovy;
-    // const vec3f vup = camera.up;
-    // const float aspect = fbSize.x / float(fbSize.y);
-    // const float theta = vfov * ((float)M_PI) / 180.0f;
-    // const float half_height = tanf(theta / 2.0f);
-    // const float half_width = aspect * half_height;
-    // const float focusDist = 10.f;
-    // const vec3f origin = camera.from;
-    // const vec3f w = normalize(camera.from - camera.at);
-    // const vec3f u = normalize(cross(vup, w));
-    // const vec3f v = cross(w, u);
-    // const vec3f lower_left_corner
-    //   = origin - half_width * focusDist*u - half_height * focusDist*v - focusDist * w;
-    // const vec3f horizontal = 2.0f*half_width *focusDist*u;
-    // const vec3f vertical   = 2.0f*half_height*focusDist*v;
-    // /* ^^^^ all stolen from pete shirley's RTOW */
-
     launchData.camera.org_00 = vec3f(-1,-1,-1);
     launchData.camera.org_du = vec3f(2,0,0);
     launchData.camera.org_dv = vec3f(0,2,0);
@@ -52,19 +28,26 @@ namespace miniApp {
   __global__ void g_localCompositing(FinalCompositingResult *results,
                                      const Fragment *fragments_allRanksMyPixels,
                                      int numPixels,
+                                     // only for debugging...
                                      int numRanks)
   {
     int tid = threadIdx.x+blockIdx.x*blockDim.x;
     if (tid >= numPixels) return;
+
+    bool dbg = (tid == 333*800+17);
     
     const Fragment *myFragments = fragments_allRanksMyPixels + tid * numRanks;
     FinalCompositingResult *myResult = results+tid;
     vec3f color = 0.f;
     float opacity = 0.f;
     for (int depth=0;depth<numRanks;depth++) {
+      auto c = myFragments[depth];
+      // if (dbg)
+      // printf("frag[%i] = %f %f %f depth %f\n",depth,c.color.x,c.color.y,c.color.z,c.depth);
       color   += (1.f-opacity)*myFragments[depth].opacity*myFragments[depth].color;
       opacity += (1.f-opacity)*myFragments[depth].opacity;
     }
+    // myResult->color = myFragments[0].color;
     myResult->color = color;
   }
   
@@ -90,16 +73,16 @@ namespace miniApp {
     float rectSize = 1.f / numRanks;
     float rectOffset = -1.f + .25f*rectSize;
     
-    float shiftPerDepth = .8f / numRanks;
+    float shiftPerDepth = .8f*rectSize / numRanks;
 
     auto addBox = [&](int x, int y, int z)
     {
       float x0 = rectOffset + x * rectSpacing + z * shiftPerDepth;
       float y0 = rectOffset + y * rectSpacing + z * shiftPerDepth;
-      float x1 = x0 + rectSize;
+      float x1 = x0 + rectSize; 
       float y1 = y0 + rectSize;
 
-      int i0 = indices.size();
+      int i0 = vertices.size();
       vertices.push_back(vec3f(x0,y0,z));
       vertices.push_back(vec3f(x0,y1,z));
       vertices.push_back(vec3f(x1,y0,z));
@@ -155,6 +138,20 @@ void resultToPixel(uint32_t *pixels, FinalCompositingResult *result, int numPixe
   int tid = threadIdx.x+blockIdx.x*blockDim.x;
   if (tid >= numPixels) return;
 
+  int ix = tid % 800;
+  int iy = tid / 800;
+  // if (tid % 567 == 0)
+  //   printf("pixel %i %i got color %f %f %f\n",
+  //          ix,iy,
+  //          result[tid].color.x,
+  //          result[tid].color.y,
+  //          result[tid].color.z);
+  // if (result[tid].color.x != ix || result[tid].color.y != iy)
+  //   printf("pixel %i %i got color %f %f %f\n",
+  //          ix,iy,
+  //          result[tid].color.x,
+  //          result[tid].color.y,
+  //          result[tid].color.z);
   pixels[tid] = owl::make_rgba(result[tid].color);
 }
 
@@ -163,7 +160,6 @@ int main(int ac, char **av)
   std::string outFileName = "slurry.png";
   
   MPI_Comm comm = MPI_COMM_WORLD;
-    
   // =============================================================================
   // init GPU - probably need to do some cleverness to figure ouw
   // which GPU you want to use per rank. or rely on
@@ -179,6 +175,8 @@ int main(int ac, char **av)
   int required = MPI_THREAD_MULTIPLE;
   int provided = 0;
   MPI_Init_thread(&ac,&av,required,&provided);
+  int rank;
+  MPI_Comm_rank(comm,&rank);
     
   // =============================================================================
   // initialize out compositing context
@@ -207,6 +205,7 @@ int main(int ac, char **av)
   // =============================================================================
   PerLaunchData launchData;
   launchData.localFB = localFB;
+  launchData.rank = rank;
   PING;
   setCamera(launchData);
   PING;
@@ -227,6 +226,7 @@ int main(int ac, char **av)
     int numPixels = fbSize.x*fbSize.y;
     cudaMallocManaged((void **)&frame,numPixels*sizeof(uint32_t));
     resultToPixel<<<divRoundUp(numPixels,128),128>>>(frame,composited,numPixels);
+    cudaStreamSynchronize(0);
     stbi_flip_vertically_on_write(true);
     stbi_write_png(outFileName.c_str(),fbSize.x,fbSize.y,4,
                    frame,fbSize.x*sizeof(uint32_t));

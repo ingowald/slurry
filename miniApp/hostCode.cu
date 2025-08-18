@@ -72,18 +72,33 @@ namespace miniApp {
   }
 
 
-  void createModel(std::vector<vec3f> &myRectPositions,
-                   float &rectSize,
-                   int numRanks)
+  void createModel(std::vector<vec3f> &vertices,
+                   std::vector<vec3i> &indices,
+                   int thisRank, int numRanks)
   {
     size_t FNV_PRIME = 0x00000100000001b3ull;
 
     float rectOffset = -1.f;
     float rectSpacing = 2.f/numRanks;
-    rectSize = 1.f / numRanks;
+    float rectSize = 1.f / numRanks;
     
     float shiftPerDepth = .8f / numRanks;
 
+    auto addBox = [&](int x, int y, int z)
+    {
+      float x0 = rectOffset + x * rectSpacing + z * shiftPerDepth;
+      float y0 = rectOffset + y * rectSpacing + z * shiftPerDepth;
+      float x1 = x0 + rectSize;
+      float y1 = y0 + rectSize;
+
+      int i0 = indices.size();
+      vertices.push_back(vec3f(x0,y0,z));
+      vertices.push_back(vec3f(x0,y1,z));
+      vertices.push_back(vec3f(x1,y0,z));
+      vertices.push_back(vec3f(x1,y1,z));
+      indices.push_back(vec3i(i0)+vec3i(0,1,3));
+      indices.push_back(vec3i(i0)+vec3i(0,3,2));
+    };
     for (int z=0;z<numRanks;z++)
       for (int y=0;y<numRanks;y++)
         for (int x=0;x<numRanks;x++) {
@@ -92,15 +107,29 @@ namespace miniApp {
           hash = hash * FNV_PRIME ^ (y+456);
           int owner = (z + hash) % numRanks;
           if (owner == thisRank)
+            addBox(x,y,z);
         }
-    for (int i=0;i
   }
 
-  void setScene(faceIteration::Context *fit,
-                const char *fileName);
+  void setScene(MPI_Comm comm,      
+                faceIteration::Context *fit)
+  {
+    int rank, size;
+    MPI_Comm_rank(comm,&rank);
+    MPI_Comm_size(comm,&size);
+#if 1
+    // this is where you'd set your scene geometry ....
+#else
+    std::vector<vec3i> indices;
+    std::vector<vec3f> vertices;
+    createModel(vertices,indices,rank,size);
+#endif
+  }
 
   int main(int ac, char **av)
   {
+    MPI_Comm comm = MPI_COMM_WORLD;
+    
     // =============================================================================
     // init GPU - probably need to do some cleverness to figure ouw
     // which GPU you want to use per rank. or rely on
@@ -121,7 +150,7 @@ namespace miniApp {
     // initialize out compositing context
     // =============================================================================
     CompositingContext *comp
-      = new CompositingContext(MPI_COMM_WORLD,
+      = new CompositingContext(comm,
                                localCompositing);
     Fragment *localFB = comp->resize(fbSize);
 
@@ -133,7 +162,7 @@ namespace miniApp {
                                      sizeof(PerLaunchData),
                                      devCode_ptx,
                                      "launchOneRay");
-    setScene(fit,"test.binmesh");
+    setScene(comm,fit);
     
     // =============================================================================
     // set up a launch, and issue launch to render local frame buffer

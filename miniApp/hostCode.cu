@@ -4,6 +4,10 @@
 #include "compositing.h"
 #include "miniApp.h"
 #include <cuda_runtime.h>
+# define STB_IMAGE_WRITE_IMPLEMENTATION 1
+# define STB_IMAGE_IMPLEMENTATION 1
+# include "stb/stb_image.h"
+# include "stb/stb_image_write.h"
 
 /* has to match the name used in the embed_ptx cmake macro used in CMakeFile */
 extern "C" const char devCode_ptx[];
@@ -12,37 +16,37 @@ namespace miniApp {
 
   typedef compositing::Context<Fragment,FinalCompositingResult> CompositingContext;
   vec2i fbSize { 800, 600 };
-  struct {
-    vec3f from { 0, 0, -1 };
-    vec3f at   { 0, 0, 0 };
-    vec3f up   { 0, 1, 0 };
-    float fovy = 20.f;
-  } camera;
+  // struct {
+  //   vec3f from { 0, 0, -1 };
+  //   vec3f at   { 0, 0, 0 };
+  //   vec3f up   { 0, 1, 0 };
+  //   float fovy = 20.f;
+  // } camera;
 
   void setCamera(PerLaunchData &launchData)
   {
     /* vvvv all stolen from pete shirley's RTOW */
-    const float vfov = camera.fovy;
-    const vec3f vup = camera.up;
-    const float aspect = fbSize.x / float(fbSize.y);
-    const float theta = vfov * ((float)M_PI) / 180.0f;
-    const float half_height = tanf(theta / 2.0f);
-    const float half_width = aspect * half_height;
-    const float focusDist = 10.f;
-    const vec3f origin = camera.from;
-    const vec3f w = normalize(camera.from - camera.at);
-    const vec3f u = normalize(cross(vup, w));
-    const vec3f v = cross(w, u);
-    const vec3f lower_left_corner
-      = origin - half_width * focusDist*u - half_height * focusDist*v - focusDist * w;
-    const vec3f horizontal = 2.0f*half_width *focusDist*u;
-    const vec3f vertical   = 2.0f*half_height*focusDist*v;
-    /* ^^^^ all stolen from pete shirley's RTOW */
+    // const float vfov = camera.fovy;
+    // const vec3f vup = camera.up;
+    // const float aspect = fbSize.x / float(fbSize.y);
+    // const float theta = vfov * ((float)M_PI) / 180.0f;
+    // const float half_height = tanf(theta / 2.0f);
+    // const float half_width = aspect * half_height;
+    // const float focusDist = 10.f;
+    // const vec3f origin = camera.from;
+    // const vec3f w = normalize(camera.from - camera.at);
+    // const vec3f u = normalize(cross(vup, w));
+    // const vec3f v = cross(w, u);
+    // const vec3f lower_left_corner
+    //   = origin - half_width * focusDist*u - half_height * focusDist*v - focusDist * w;
+    // const vec3f horizontal = 2.0f*half_width *focusDist*u;
+    // const vec3f vertical   = 2.0f*half_height*focusDist*v;
+    // /* ^^^^ all stolen from pete shirley's RTOW */
 
-    launchData.camera.org = origin;
-    launchData.camera.dir_00 = lower_left_corner;
-    launchData.camera.dir_dx = horizontal / fbSize.x;
-    launchData.camera.dir_dy = vertical / fbSize.y;
+    launchData.camera.org_00 = vec3f(-1,-1,-1);
+    launchData.camera.org_du = vec3f(2,0,0);
+    launchData.camera.org_dv = vec3f(0,2,0);
+    launchData.camera.dir    = vec3f(0,0,1);
   }
 
   __global__ void g_localCompositing(FinalCompositingResult *results,
@@ -55,9 +59,13 @@ namespace miniApp {
     
     const Fragment *myFragments = fragments_allRanksMyPixels + tid * numRanks;
     FinalCompositingResult *myResult = results+tid;
-    myResult->value = 0.f;
-    for (int depth=0;depth<numRanks;depth++)
-      myResult->value += myFragments[depth].value;
+    vec3f color = 0.f;
+    float opacity = 0.f;
+    for (int depth=0;depth<numRanks;depth++) {
+      color   += (1.f-opacity)*myFragments[depth].opacity*myFragments[depth].color;
+      opacity += (1.f-opacity)*myFragments[depth].opacity;
+    }
+    myResult->color = color;
   }
   
 
@@ -78,9 +86,9 @@ namespace miniApp {
   {
     size_t FNV_PRIME = 0x00000100000001b3ull;
 
-    float rectOffset = -1.f;
     float rectSpacing = 2.f/numRanks;
     float rectSize = 1.f / numRanks;
+    float rectOffset = -1.f + .25f*rectSize;
     
     float shiftPerDepth = .8f / numRanks;
 
@@ -98,6 +106,8 @@ namespace miniApp {
       vertices.push_back(vec3f(x1,y1,z));
       indices.push_back(vec3i(i0)+vec3i(0,1,3));
       indices.push_back(vec3i(i0)+vec3i(0,3,2));
+
+      for (auto vtx : vertices) PRINT(vtx);
     };
     for (int z=0;z<numRanks;z++)
       for (int y=0;y<numRanks;y++)
@@ -114,22 +124,44 @@ namespace miniApp {
   void setScene(MPI_Comm comm,      
                 faceIteration::Context *fit)
   {
+    PING;
     int rank, size;
     MPI_Comm_rank(comm,&rank);
     MPI_Comm_size(comm,&size);
-#if 1
+#if 0
     // this is where you'd set your scene geometry ....
 #else
+    UserMeshData umd;
+    umd.meshColor = owl::common::randomColor(13+rank);
     std::vector<vec3i> indices;
     std::vector<vec3f> vertices;
     createModel(vertices,indices,rank,size);
 #endif
+    PRINT(vertices.size());
+    PRINT(indices.size());
+    fit->setMesh(0,
+                 vertices.data(),vertices.size(),
+                 indices.data(),indices.size(),
+                 &umd);
+    PING;
   }
 }
 using namespace miniApp;
 
+
+__global__
+void resultToPixel(uint32_t *pixels, FinalCompositingResult *result, int numPixels)
+{
+  int tid = threadIdx.x+blockIdx.x*blockDim.x;
+  if (tid >= numPixels) return;
+
+  pixels[tid] = owl::make_rgba(result[tid].color);
+}
+
 int main(int ac, char **av)
 {
+  std::string outFileName = "slurry.png";
+  
   MPI_Comm comm = MPI_COMM_WORLD;
     
   // =============================================================================
@@ -163,16 +195,23 @@ int main(int ac, char **av)
     = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
                                    sizeof(PerLaunchData),
                                    devCode_ptx,
-                                   "launchOneRay");
+                                   "faceIterationCallback",
+                                   "miniApp_perPixel");
+  PING;
   setScene(comm,fit);
+  fit->build();
     
+  PING;
   // =============================================================================
   // set up a launch, and issue launch to render local frame buffer
   // =============================================================================
   PerLaunchData launchData;
   launchData.localFB = localFB;
+  PING;
   setCamera(launchData);
+  PING;
   fit->launch(fbSize,&launchData);
+  PING;
 
 
   // =============================================================================
@@ -180,7 +219,19 @@ int main(int ac, char **av)
   // =============================================================================
   FinalCompositingResult *composited
     = comp->run();
-    
+  PING;
+
+  if (comp->mpi.rank == 0) {
+    printf("saving pic...\n");
+    uint32_t *frame = 0;
+    int numPixels = fbSize.x*fbSize.y;
+    cudaMallocManaged((void **)&frame,numPixels*sizeof(uint32_t));
+    resultToPixel<<<divRoundUp(numPixels,128),128>>>(frame,composited,numPixels);
+    stbi_flip_vertically_on_write(true);
+    stbi_write_png(outFileName.c_str(),fbSize.x,fbSize.y,4,
+                   frame,fbSize.x*sizeof(uint32_t));
+    cudaFree(frame);
+  }
 
   // =============================================================================
   // and wind down in reverse order

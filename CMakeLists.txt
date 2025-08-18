@@ -37,6 +37,8 @@ set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 set(CMAKE_CUDA_ARCHITECTURES native)
 
 add_subdirectory(submodules/owl EXCLUDE_FROM_ALL)
+add_library(stb INTERFACE)
+target_include_directories(stb INTERFACE ${CMAKE_CURRENT_LIST_DIR}/submodules)
 
 add_subdirectory(faceIteration)
 add_subdirectory(compositing)

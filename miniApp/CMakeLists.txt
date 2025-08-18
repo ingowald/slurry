@@ -16,4 +16,5 @@ target_link_libraries(miniApp PUBLIC
   faceIteration
   compositing
   embedded_devCode
+  stb
   )

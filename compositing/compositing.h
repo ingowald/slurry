@@ -45,7 +45,7 @@ namespace slurry {
         int rank = -1;
         int size = -1;
       } mpi;
-              /*! user-provided kernel that can composite a range of
+      /*! user-provided kernel that can composite a range of
                 pixels' worth of fragments. input is a array of
                 fragments with 'numPixelsThisRank' pixels, and
                 'numRanks' fragments per pixel; order is first all

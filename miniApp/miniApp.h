@@ -6,25 +6,27 @@ namespace miniApp {
   using namespace slurry;
 
   struct UserMeshData : public faceIteration::MeshData {
-    float someDummyValue;
+    // anything you want to add ...
+    vec3f meshColor;
   };
 
   struct Fragment {
     float depth;
-    float value;
+    vec3f color;
     float opacity;
   };
 
   struct FinalCompositingResult {
-    float value;
+    vec3f color;
   };
   
   struct PerLaunchData : public faceIteration::LaunchData {
     struct {
-      vec3f org;
-      vec3f dir_00;
-      vec3f dir_dx;
-      vec3f dir_dy;
+      // for this simple example, let's use a orthogonal camera
+      vec3f org_00;
+      vec3f org_du;
+      vec3f org_dv;
+      vec3f dir;
     } camera;
     int frameID;
     Fragment *localFB;
@@ -32,6 +34,7 @@ namespace miniApp {
 
   struct PerRayData : public faceIteration::PerRayData {
     Fragment fragment;
+    bool dbg;
   };
 
 }

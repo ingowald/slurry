@@ -31,12 +31,13 @@ namespace slurry {
                            int numMeshes,
                            size_t userLaunchDataSize,
                            const char *embeddedPtxCode,
-                           const char *entryPointName);
+                           const char *perFaceEntryPoint,
+                           const char *perLaunchEntryPoint);
       virtual void build() = 0;
       virtual void setMesh(int meshID,
                            const vec3f *vertices,
                            int numVertices,
-                           const vec3f *indices,
+                           const vec3i *indices,
                            int numIndices,
                            MeshData  *pUserMeshData) = 0;
       virtual void launch(vec2i launchDims, LaunchData *pLaunchData) = 0;

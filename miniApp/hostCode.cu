@@ -9,7 +9,8 @@
 # include "stb/stb_image.h"
 # include "stb/stb_image_write.h"
 
-/* has to match the name used in the embed_ptx cmake macro used in CMakeFile */
+/* has to match the name of the file used in the embed_ptx cmake macro
+   used in CMakeFile */
 extern "C" const char devCode_ptx[];
 
 namespace miniApp {
@@ -25,48 +26,82 @@ namespace miniApp {
     launchData.camera.dir    = vec3f(0,0,1);
   }
 
-  __global__ void g_localCompositing(FinalCompositingResult *results,
-                                     const Fragment *fragments_allRanksMyPixels,
-                                     int numPixels,
-                                     // only for debugging...
-                                     int numRanks)
+  /*! do whatever kind of compositing the app wants to do - input is a
+      list of fragments sorted by a) (major) pixel ID and b) (minor)
+      depth. Each rank produces exactly one fragment per pixel, so the
+      total number of fragments is `numPixelsOnThisRank*numRanks`,
+      sorted such that the first `numRanks` fragments are those for
+      the first pixel on this rank (sorted in increasing depth), then
+      `numRanks` fragments for the second pixel (again sorted in
+      depth), etc. Output is one final composited value (of type
+      FinalCompositingResult, whatever that might be, per pixel on
+      this rank */
+  __global__
+  void g_localCompositing(FinalCompositingResult *results,
+                          const Fragment *fragments_allRanksMyPixels,
+                          /*! number of pixels we are responsible for
+                            compositing on this rank */
+                          int numPixelsOnThisRank,
+                          /*! number of fragments (one per rank) for
+                              each pixel */
+                          int numRanks)
   {
+    /* IMPORTANT: though we do standard 'over'-compositing here, with
+       colors, alpha, etcpp; but there is no implicit assumption
+       anywhere in 'composite.h' that this is what is being done. You
+       can change the 'FinalCompositingResult' and 'Fragment' type to
+       hold whatever you want (as long as the fragment is derived from
+       `slurry::Fragment`), and do whatever compositing you want */
     int tid = threadIdx.x+blockIdx.x*blockDim.x;
-    if (tid >= numPixels) return;
+    if (tid >= numPixelsOnThisRank) return;
 
-    bool dbg = (tid == 333*800+17);
-    
     const Fragment *myFragments = fragments_allRanksMyPixels + tid * numRanks;
     FinalCompositingResult *myResult = results+tid;
     vec3f color = 0.f;
     float opacity = 0.f;
     for (int depth=0;depth<numRanks;depth++) {
       auto c = myFragments[depth];
-      // if (dbg)
-      // printf("frag[%i] = %f %f %f depth %f\n",depth,c.color.x,c.color.y,c.color.z,c.depth);
       color   += (1.f-opacity)*myFragments[depth].opacity*myFragments[depth].color;
       opacity += (1.f-opacity)*myFragments[depth].opacity;
     }
-    // myResult->color = myFragments[0].color;
     myResult->color = color;
   }
   
-
+  /*! a c-style function that launches the cuda kernel, we need a
+      separate C linkage function to pass a function pointer to the
+      compositing interface (which allows that compositing interface
+      to not care what kidn of compositing the user wants to do */
   void localCompositing(FinalCompositingResult *results,
                         const Fragment *fragments,
-                        int numPixels,
+                        int numPixelsOnThisRank,
                         int numRanks)
   {
     int bs = 128;
     int nb = divRoundUp(numPixels,bs);
-    g_localCompositing<<<nb,bs>>>(results,fragments,numPixels,numRanks);
+    g_localCompositing<<<nb,bs>>>(results,fragments,numPixelsOnThisRank,numRanks);
   }
 
-
-  void createModel(std::vector<vec3f> &vertices,
-                   std::vector<vec3i> &indices,
-                   int thisRank, int numRanks)
+  /*! in this mini app, we use this to create some kind of test model;
+      what geometry you want to pass to the faceIteration interface
+      can be changed to whatever you want */
+  faceIteration::Context *setScene(MPI_Comm comm,      
+                                   faceIteration::Context *fit)
   {
+    /* sample app creates one mesh per rank, with variour different
+       depth-overlapping squares */
+    faceIteration::Context *fit
+      = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
+                                     sizeof(PerLaunchData),
+                                     devCode_ptx,
+                                     "faceIterationCallback",
+                                     "miniApp_perPixel");
+    int rank, size;
+    MPI_Comm_rank(comm,&rank);
+    MPI_Comm_size(comm,&size);
+    
+    std::vector<vec3i> indices;
+    std::vector<vec3f> vertices;
+
     size_t FNV_PRIME = 0x00000100000001b3ull;
 
     float rectSpacing = 2.f/numRanks;
@@ -102,56 +137,24 @@ namespace miniApp {
           if (owner == thisRank)
             addBox(x,y,z);
         }
-  }
-
-  void setScene(MPI_Comm comm,      
-                faceIteration::Context *fit)
-  {
-    PING;
-    int rank, size;
-    MPI_Comm_rank(comm,&rank);
-    MPI_Comm_size(comm,&size);
-#if 0
-    // this is where you'd set your scene geometry ....
-#else
-    UserMeshData umd;
-    umd.meshColor = owl::common::randomColor(13+rank);
-    std::vector<vec3i> indices;
-    std::vector<vec3f> vertices;
-    createModel(vertices,indices,rank,size);
-#endif
-    PRINT(vertices.size());
-    PRINT(indices.size());
     fit->setMesh(0,
                  vertices.data(),vertices.size(),
                  indices.data(),indices.size(),
                  &umd);
-    PING;
+    // IMPORTANT: call built after all meshes have been set!
+    fit->build();
+    return fit;
   }
 }
 using namespace miniApp;
 
-
+/*! just for this miniapp - convert to an rgba image to save test image to png */
 __global__
 void resultToPixel(uint32_t *pixels, FinalCompositingResult *result, int numPixels)
 {
   int tid = threadIdx.x+blockIdx.x*blockDim.x;
   if (tid >= numPixels) return;
 
-  int ix = tid % 800;
-  int iy = tid / 800;
-  // if (tid % 567 == 0)
-  //   printf("pixel %i %i got color %f %f %f\n",
-  //          ix,iy,
-  //          result[tid].color.x,
-  //          result[tid].color.y,
-  //          result[tid].color.z);
-  // if (result[tid].color.x != ix || result[tid].color.y != iy)
-  //   printf("pixel %i %i got color %f %f %f\n",
-  //          ix,iy,
-  //          result[tid].color.x,
-  //          result[tid].color.y,
-  //          result[tid].color.z);
   pixels[tid] = owl::make_rgba(result[tid].color);
 }
 
@@ -189,39 +192,26 @@ int main(int ac, char **av)
   // =============================================================================
   // specify the geometry
   // =============================================================================
-  faceIteration::Context *fit
-    = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
-                                   sizeof(PerLaunchData),
-                                   devCode_ptx,
-                                   "faceIterationCallback",
-                                   "miniApp_perPixel");
-  PING;
-  setScene(comm,fit);
-  fit->build();
+  faceIteration::Context *fit = 
+    setScene(comm);
     
-  PING;
   // =============================================================================
   // set up a launch, and issue launch to render local frame buffer
   // =============================================================================
   PerLaunchData launchData;
   launchData.localFB = localFB;
   launchData.rank = rank;
-  PING;
   setCamera(launchData);
-  PING;
   fit->launch(fbSize,&launchData);
-  PING;
-
 
   // =============================================================================
   // composite the local frame buffers
   // =============================================================================
   FinalCompositingResult *composited
     = comp->run();
-  PING;
 
   if (comp->mpi.rank == 0) {
-    printf("saving pic...\n");
+    // rank 0 has the final coposited pixels, save the test image
     uint32_t *frame = 0;
     int numPixels = fbSize.x*fbSize.y;
     cudaMallocManaged((void **)&frame,numPixels*sizeof(uint32_t));

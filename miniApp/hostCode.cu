@@ -125,69 +125,70 @@ namespace miniApp {
     createModel(vertices,indices,rank,size);
 #endif
   }
-
-  int main(int ac, char **av)
-  {
-    MPI_Comm comm = MPI_COMM_WORLD;
-    
-    // =============================================================================
-    // init GPU - probably need to do some cleverness to figure ouw
-    // which GPU you want to use per rank. or rely on
-    // CUDA_VISIBLE_DEVICES being set...
-    // =============================================================================
-    int gpuID = 0;
-    cudaSetDevice(gpuID);
-    cudaFree(0);
-
-    // =============================================================================
-    // nit MPI - do this after gpu init so mpi can pick up on gpu.
-    // =============================================================================
-    int required = MPI_THREAD_MULTIPLE;
-    int provided = 0;
-    MPI_Init_thread(&ac,&av,required,&provided);
-    
-    // =============================================================================
-    // initialize out compositing context
-    // =============================================================================
-    CompositingContext *comp
-      = new CompositingContext(comm,
-                               localCompositing);
-    Fragment *localFB = comp->resize(fbSize);
-
-    // =============================================================================
-    // specify the geometry
-    // =============================================================================
-    faceIteration::Context *fit
-      = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
-                                     sizeof(PerLaunchData),
-                                     devCode_ptx,
-                                     "launchOneRay");
-    setScene(comm,fit);
-    
-    // =============================================================================
-    // set up a launch, and issue launch to render local frame buffer
-    // =============================================================================
-    PerLaunchData launchData;
-    launchData.localFB = localFB;
-    setCamera(launchData);
-    fit->launch(fbSize,&launchData);
-
-
-    // =============================================================================
-    // composite the local frame buffers
-    // =============================================================================
-    FinalCompositingResult *composited
-      = comp->run();
-    
-
-    // =============================================================================
-    // and wind down in reverse order
-    // =============================================================================
-    delete fit;
-    delete comp;
-    
-    MPI_Finalize();
-    return 0;
-  }
-  
 }
+using namespace miniApp;
+
+int main(int ac, char **av)
+{
+  MPI_Comm comm = MPI_COMM_WORLD;
+    
+  // =============================================================================
+  // init GPU - probably need to do some cleverness to figure ouw
+  // which GPU you want to use per rank. or rely on
+  // CUDA_VISIBLE_DEVICES being set...
+  // =============================================================================
+  int gpuID = 0;
+  cudaSetDevice(gpuID);
+  cudaFree(0);
+
+  // =============================================================================
+  // nit MPI - do this after gpu init so mpi can pick up on gpu.
+  // =============================================================================
+  int required = MPI_THREAD_MULTIPLE;
+  int provided = 0;
+  MPI_Init_thread(&ac,&av,required,&provided);
+    
+  // =============================================================================
+  // initialize out compositing context
+  // =============================================================================
+  CompositingContext *comp
+    = new CompositingContext(comm,
+                             localCompositing);
+  Fragment *localFB = comp->resize(fbSize);
+
+  // =============================================================================
+  // specify the geometry
+  // =============================================================================
+  faceIteration::Context *fit
+    = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
+                                   sizeof(PerLaunchData),
+                                   devCode_ptx,
+                                   "launchOneRay");
+  setScene(comm,fit);
+    
+  // =============================================================================
+  // set up a launch, and issue launch to render local frame buffer
+  // =============================================================================
+  PerLaunchData launchData;
+  launchData.localFB = localFB;
+  setCamera(launchData);
+  fit->launch(fbSize,&launchData);
+
+
+  // =============================================================================
+  // composite the local frame buffers
+  // =============================================================================
+  FinalCompositingResult *composited
+    = comp->run();
+    
+
+  // =============================================================================
+  // and wind down in reverse order
+  // =============================================================================
+  delete fit;
+  delete comp;
+    
+  MPI_Finalize();
+  return 0;
+}
+  

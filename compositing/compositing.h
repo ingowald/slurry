@@ -23,7 +23,7 @@ namespace slurry {
                 numRanks fragments for the first pixel (sorted by
                 depth), then those for the second pixel, etc.
               */
-              void (*userCompositeKernel)(ResultT *outputFragments,
+              void (*userCompositingKernel)(ResultT *outputFragments,
                                           /*! one input fragment per pixel on
                                             this rank per rank in the scene,
                                             already sorted by depth */
@@ -52,7 +52,7 @@ namespace slurry {
                 numRanks fragments for the first pixel (sorted by
                 depth), then those for the second pixel, etc.
               */
-      void (*userCompositeKernel)(ResultT *outputFragments,
+      void (*userCompositingKernel)(ResultT *outputFragments,
                                   const FragmentT *inputFragments,
                                   int numPixelsThisRank,
                                   int numRanks) = nullptr;
@@ -74,7 +74,7 @@ namespace slurry {
     template<typename FragmentT, typename ResultT>
     Context<FragmentT,ResultT>::Context
     (MPI_Comm comm,
-     void (*userCompositeKernel)(ResultT *outputFragments,
+     void (*userCompositingKernel)(ResultT *outputFragments,
                                  /*! one input fragment per pixel on
                                    this rank per rank in the scene,
                                    already sorted by depth */
@@ -82,7 +82,7 @@ namespace slurry {
                                  int numPixelsThisRank,
                                  int numRanks)
      )
-      : userCompositeKernel(userCompositeKernel)
+      : userCompositingKernel(userCompositingKernel)
     {
       mpi.comm = comm;
       MPI_Comm_rank(mpi.comm,&mpi.rank);
@@ -171,6 +171,7 @@ namespace slurry {
     
       
     template<typename FragmentT>
+    __global__
     void g_generateKeys(uint64_t *sortKeys,
                         FragmentT *fragments,
                         int numFragsThisRank,
@@ -180,11 +181,11 @@ namespace slurry {
       if (tid >= numRanks*numFragsThisRank) return;
 
       int pixelID = tid % numFragsThisRank;
-      int rank = tid / numFragsThisRank;
+      // int rank    = tid / numFragsThisRank;
 
       uint64_t key
         = (uint64_t(pixelID) << 32)
-        | uint64_t(float_as_uint(fragments[tid].depth))
+        | uint64_t(__float_as_int(fragments[tid].depth))
         ;
       sortKeys[tid] = key;
     }
@@ -227,14 +228,15 @@ namespace slurry {
       int numWorkItems = (my_end-my_begin)*mpi.size;
       int bs = 1024;
       int nb = divRoundUp(numWorkItems,bs);
-      void *sortKeys;
-      g_generateKeys<nb,bs>(sortKeys,allFragments,my_end-my_begin,mpi.size);
+      uint64_t *sortKeys;
+      cudaMalloc((void**)&sortKeys,numWorkItems*sizeof(uint64_t));
+      g_generateKeys<<<nb,bs>>>(sortKeys,allFragments,my_end-my_begin,mpi.size);
       sortFragments(sortKeys,allFragments,numWorkItems);
-
+      cudaFree(sortKeys);
       // =============================================================================
       // let user composite these fragments, and turn then into results
       // =============================================================================
-      userCompositingKernel(localResults,allFragments,my_end-my_begin,mpi.size);
+      this->userCompositingKernel(localResults,allFragments,my_end-my_begin,mpi.size);
       cudaStreamSynchronize(0);
 
       // =============================================================================
@@ -261,7 +263,7 @@ namespace slurry {
           ? (my_end-my_begin)*sizeof(ResultT)
           : 0;
       }
-      Alltoallv(sendBuf,
+      MPI_Alltoallv(sendBuf,
                 (const int*)sendCounts.data(),
                 (const int*)sendOffsets.data(),
                 MPI_BYTE,

@@ -9,10 +9,6 @@
 
 namespace slurry {
   using namespace owl::common;
-  // using owl::common::vec2i;
-  // using owl::common::vec3i;
-  // using owl::common::vec3f;
-  // using owl::common::box3f;
   
   namespace faceIteration {
     
@@ -75,8 +71,6 @@ namespace slurry {
     void traceFrontToBack(OptixTraversableHandle bvh,
                           vec3f org, vec3f dir, float t0, float t1,
                           PerRayData &prd);
-    
-// # define FACE_ITERATION_DEFINE_PROGRAMS(perRayPerLaunchFct, perRayPerFaceFct) /* nothing yet */
 #endif
 
 
@@ -85,6 +79,25 @@ namespace slurry {
     // IMPLEMENTATION
     // #############################################################################
 
+#define FACEIT_PER_FACE_FUNCTION(userFct)                       \
+    OPTIX_CLOSEST_HIT_PROGRAM(userFct)()                        \
+    {                                                           \
+      ::slurry::faceIteration::PerRayData &prd                  \
+        = owl::getPRD<slurry::faceIteration::PerRayData>();     \
+      auto result = userFct();                                  \
+      if (result == ::slurry::faceIteration::DONE_TRAVERSING)   \
+        prd.faceIt.tHit = -1.f;                                 \
+    }                                                           \
+    OPTIX_ANY_HIT_PROGRAM(userFct)()                            \
+    {                                                           \
+      ::slurry::faceIteration::PerRayData &prd                  \
+        = owl::getPRD<slurry::faceIteration::PerRayData>();     \
+      auto result = userFct();                                  \
+      if (result == ::slurry::faceIteration::DONE_TRAVERSING)   \
+        prd.faceIt.tHit = -1.f;                                 \
+    }
+
+    
 #ifdef __CUDA_ARCH__
     inline __device__ float justBelow(float f)
     { return nextafterf(f,-1.f); }
@@ -96,7 +109,6 @@ namespace slurry {
                           vec3f org, vec3f dir, float t0, float t1,
                           PerRayData &prd)
     {
-      // slurry::PerRay prd = { &userPRD, -1.f };
       owl::Ray ray;
       ray.origin = org;
       ray.direction = dir;

@@ -43,11 +43,10 @@ namespace slurry {
                              const std::string &perFaceEntryPoint,
                              const std::string &perLaunchEntryPoint)
     {
-      PING;
       owl = owlContextCreate(&gpuID,1);
       mod = owlModuleCreate(owl,embeddedPtxCode);
       
-      std::string rgName = perLaunchEntryPoint;//+"_rg";
+      std::string rgName = perLaunchEntryPoint;
       rg = owlRayGenCreate(owl,mod,rgName.c_str(),0,0,0);
 
       OWLVarDecl lpArgs { "raw", OWLDataType(OWL_USER_TYPE_BEGIN+userLaunchDataSize), 0 };
@@ -57,17 +56,15 @@ namespace slurry {
       gt = owlGeomTypeCreate(owl,OWL_GEOM_TRIANGLES,
                              (int)sizeOfUserMesh,&gtArgs,1);
       
-      std::string chName = perFaceEntryPoint;//+"_ch";
+      std::string chName = perFaceEntryPoint;
       owlGeomTypeSetClosestHit(gt,0,mod,chName.c_str());
       
-      std::string ahName = perFaceEntryPoint;//"_ah";
+      std::string ahName = perFaceEntryPoint;
       owlGeomTypeSetAnyHit(gt,0,mod,ahName.c_str());
       
-      PING;
       owlBuildPrograms(owl);
       owlBuildPipeline(owl);
 
-      PING;
       meshes.resize(numMeshes);
     }
 
@@ -85,56 +82,41 @@ namespace slurry {
     {
       assert(meshes[meshID] == 0);
       
-      PING;
       OWLGeom geom = owlGeomCreate(owl,gt);
       
-      PING;
       OWLBuffer verticesBuffer
         = owlDeviceBufferCreate(owl,OWL_FLOAT3,numVertices,vertices);
       owlTrianglesSetVertices(geom,verticesBuffer,numVertices,sizeof(vec3f),0);
       pUserMeshData->vertices = (vec3f*)owlBufferGetPointer(verticesBuffer,0);
       pUserMeshData->numVertices = numVertices;
       
-      PING;
       OWLBuffer indicesBuffer
         = owlDeviceBufferCreate(owl,OWL_INT3,numIndices,indices);
       owlTrianglesSetIndices(geom,indicesBuffer,numIndices,sizeof(vec3i),0);
       pUserMeshData->indices = (vec3i*)owlBufferGetPointer(indicesBuffer,0);
       pUserMeshData->numIndices = numIndices;
       
-      PING;
       owlGeomSetRaw(geom,"raw",pUserMeshData);
-      PING;
       meshes[meshID] = geom;
     }
     
     void ContextImpl::build()
     {
-      PING;
       for (auto mesh : meshes) assert(mesh);
-      PING;
       blas = owlTrianglesGeomGroupCreate(owl,meshes.size(),meshes.data());
       owlGroupBuildAccel(blas);
 
-      PING;
       tlas = owlInstanceGroupCreate(owl,1,&blas,nullptr);
       owlGroupBuildAccel(tlas);
-      PING;
       owlBuildSBT(owl);
     }
     
     void ContextImpl::launch(vec2i launchDims, LaunchData *pLaunchData)
     {
       assert(tlas);
-      PING;
-      PRINT(tlas);
-      PRINT(pLaunchData);
       pLaunchData->faceIt.bvh = owlGroupGetTraversable(tlas,0);
-      PING;
       owlParamsSetRaw(lp,"raw",pLaunchData);
-      PING;
       owlLaunch2D(rg,launchDims.x,launchDims.y,lp);
-      PING;
     }
     
 

@@ -60,7 +60,6 @@ namespace miniApp {
     vec3f color = 0.f;
     float opacity = 0.f;
     for (int depth=0;depth<numRanks;depth++) {
-      auto c = myFragments[depth];
       color   += (1.f-opacity)*myFragments[depth].opacity*myFragments[depth].color;
       opacity += (1.f-opacity)*myFragments[depth].opacity;
     }
@@ -77,38 +76,33 @@ namespace miniApp {
                         int numRanks)
   {
     int bs = 128;
-    int nb = divRoundUp(numPixels,bs);
+    int nb = divRoundUp(numPixelsOnThisRank,bs);
     g_localCompositing<<<nb,bs>>>(results,fragments,numPixelsOnThisRank,numRanks);
   }
 
   /*! in this mini app, we use this to create some kind of test model;
       what geometry you want to pass to the faceIteration interface
       can be changed to whatever you want */
-  faceIteration::Context *setScene(MPI_Comm comm,      
-                                   faceIteration::Context *fit)
+  faceIteration::Context *setScene(MPI_Comm comm, int gpuID)
   {
     /* sample app creates one mesh per rank, with variour different
        depth-overlapping squares */
-    faceIteration::Context *fit
-      = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
-                                     sizeof(PerLaunchData),
-                                     devCode_ptx,
-                                     "faceIterationCallback",
-                                     "miniApp_perPixel");
-    int rank, size;
-    MPI_Comm_rank(comm,&rank);
-    MPI_Comm_size(comm,&size);
+    struct {
+      int rank, size;
+    } mpi;
+    MPI_Comm_rank(comm,&mpi.rank);
+    MPI_Comm_size(comm,&mpi.size);
     
     std::vector<vec3i> indices;
     std::vector<vec3f> vertices;
 
     size_t FNV_PRIME = 0x00000100000001b3ull;
 
-    float rectSpacing = 2.f/numRanks;
-    float rectSize = 1.f / numRanks;
-    float rectOffset = -1.f + .25f*rectSize;
+    float rectSpacing =  2.f / mpi.size;
+    float rectSize     = 1.f / mpi.size;
+    float rectOffset  = -1.f + .25f*rectSize;
     
-    float shiftPerDepth = .8f*rectSize / numRanks;
+    float shiftPerDepth = .8f*rectSize / mpi.size;
 
     auto addBox = [&](int x, int y, int z)
     {
@@ -122,21 +116,29 @@ namespace miniApp {
       vertices.push_back(vec3f(x0,y1,z));
       vertices.push_back(vec3f(x1,y0,z));
       vertices.push_back(vec3f(x1,y1,z));
+      
       indices.push_back(vec3i(i0)+vec3i(0,1,3));
       indices.push_back(vec3i(i0)+vec3i(0,3,2));
-
-      for (auto vtx : vertices) PRINT(vtx);
     };
-    for (int z=0;z<numRanks;z++)
-      for (int y=0;y<numRanks;y++)
-        for (int x=0;x<numRanks;x++) {
+    for (int z=0;z<mpi.size;z++)
+      for (int y=0;y<mpi.size;y++)
+        for (int x=0;x<mpi.size;x++) {
           size_t hash = 0x12345;
           hash = hash * FNV_PRIME ^ (x+123);
           hash = hash * FNV_PRIME ^ (y+456);
-          int owner = (z + hash) % numRanks;
-          if (owner == thisRank)
+          int owner = (z + hash) % mpi.size;
+          if (owner == mpi.rank)
             addBox(x,y,z);
         }
+    
+    faceIteration::Context *fit
+      = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
+                                     sizeof(PerLaunchData),
+                                     devCode_ptx,
+                                     "faceIterationCallback",
+                                     "miniApp_perPixel");
+    UserMeshData umd;
+    umd.meshColor = owl::common::randomColor(mpi.rank+13);
     fit->setMesh(0,
                  vertices.data(),vertices.size(),
                  indices.data(),indices.size(),
@@ -193,7 +195,7 @@ int main(int ac, char **av)
   // specify the geometry
   // =============================================================================
   faceIteration::Context *fit = 
-    setScene(comm);
+    setScene(comm,gpuID);
     
   // =============================================================================
   // set up a launch, and issue launch to render local frame buffer

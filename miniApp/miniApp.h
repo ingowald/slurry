@@ -1,3 +1,6 @@
+// Copyright 2025 Ingo Wald
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include "faceIteration.h"
@@ -11,7 +14,13 @@ namespace miniApp {
   };
 
   struct Fragment {
+    /*! each fragment type to be used with compositing:: library HAS
+        to have a `float depth` member, but where, or what else is in
+        that struct, is up to the app */
     float depth;
+
+    /*! this is just for the sample, feel free to modify these as you
+        wish: */
     vec3f color;
     float opacity;
   };

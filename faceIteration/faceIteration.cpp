@@ -57,9 +57,11 @@ namespace slurry {
                              (int)sizeOfUserMesh,&gtArgs,1);
       
       std::string chName = perFaceEntryPoint;
+      PRINT(chName);
       owlGeomTypeSetClosestHit(gt,0,mod,chName.c_str());
       
       std::string ahName = perFaceEntryPoint;
+      PRINT(ahName);
       owlGeomTypeSetAnyHit(gt,0,mod,ahName.c_str());
       
       owlBuildPrograms(owl);

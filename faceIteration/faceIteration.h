@@ -57,6 +57,7 @@ namespace slurry {
     struct PerRayData {
       struct {
         float tHit;
+        bool  dbg;
       } faceIt;
     };
     
@@ -70,7 +71,7 @@ namespace slurry {
     inline __device__
     void traceFrontToBack(OptixTraversableHandle bvh,
                           vec3f org, vec3f dir, float t0, float t1,
-                          PerRayData &prd);
+                          PerRayData &prd, bool dbg=false);
 #endif
 
 
@@ -84,17 +85,18 @@ namespace slurry {
     {                                                           \
       ::slurry::faceIteration::PerRayData &prd                  \
         = owl::getPRD<slurry::faceIteration::PerRayData>();     \
-      auto result = userFct();                                  \
-      if (result == ::slurry::faceIteration::DONE_TRAVERSING)   \
-        prd.faceIt.tHit = -1.f;                                 \
+      prd.faceIt.tHit = optixGetRayTmax();                      \
     }                                                           \
     OPTIX_ANY_HIT_PROGRAM(userFct)()                            \
     {                                                           \
       ::slurry::faceIteration::PerRayData &prd                  \
         = owl::getPRD<slurry::faceIteration::PerRayData>();     \
       auto result = userFct();                                  \
-      if (result == ::slurry::faceIteration::DONE_TRAVERSING)   \
+      if (result == ::slurry::faceIteration::DONE_TRAVERSING) { \
+        optixTerminateRay();                                    \
         prd.faceIt.tHit = -1.f;                                 \
+      } else                                                    \
+        optixIgnoreIntersection();                              \
     }
 
     
@@ -107,13 +109,17 @@ namespace slurry {
     inline __device__
     void traceFrontToBack(OptixTraversableHandle tlas,
                           vec3f org, vec3f dir, float t0, float t1,
-                          PerRayData &prd)
+                          PerRayData &prd, bool dbg)
     {
       owl::Ray ray;
       ray.origin = org;
+      if (dir.x == 0.f) dir.x = 1e-8f;
+      if (dir.y == 0.f) dir.y = 1e-8f;
+      if (dir.z == 0.f) dir.z = 1e-8f;
       ray.direction = dir;
       ray.tmin = t0;
       ray.tmax = t1;
+      prd.faceIt.dbg = dbg;
       while (1) {
         // ------------------------------------------------------------------
         // first, trace for ONLY closest hit - this will return the
@@ -129,7 +135,10 @@ namespace slurry {
         ray.tmin = justBelow(prd.faceIt.tHit);
         ray.tmax = justAbove(prd.faceIt.tHit);
         owl::traceRay(tlas,ray,prd,OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT);
-      
+        if (prd.faceIt.tHit < 0.f)
+          // no more surface(s) until ray_tmax
+          break;
+
         ray.tmin = prd.faceIt.tHit;
       }
   }

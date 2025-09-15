@@ -104,7 +104,7 @@ namespace miniApp {
     
     float shiftPerDepth = .8f*rectSize / mpi.size;
 
-    auto addBox = [&](int x, int y, int z)
+    auto addBox = [&](int x, int y, int z, int dz)
     {
       float x0 = rectOffset + x * rectSpacing + z * shiftPerDepth;
       float y0 = rectOffset + y * rectSpacing + z * shiftPerDepth;
@@ -112,10 +112,10 @@ namespace miniApp {
       float y1 = y0 + rectSize;
 
       int i0 = vertices.size();
-      vertices.push_back(vec3f(x0,y0,z));
-      vertices.push_back(vec3f(x0,y1,z));
-      vertices.push_back(vec3f(x1,y0,z));
-      vertices.push_back(vec3f(x1,y1,z));
+      vertices.push_back(vec3f(x0,y0,z+dz));
+      vertices.push_back(vec3f(x0,y1,z+dz));
+      vertices.push_back(vec3f(x1,y0,z+dz));
+      vertices.push_back(vec3f(x1,y1,z+dz));
       
       indices.push_back(vec3i(i0)+vec3i(0,1,3));
       indices.push_back(vec3i(i0)+vec3i(0,3,2));
@@ -127,9 +127,15 @@ namespace miniApp {
           hash = hash * FNV_PRIME ^ (x+123);
           hash = hash * FNV_PRIME ^ (y+456);
           int owner = (z + hash) % mpi.size;
-          if (owner == mpi.rank)
-            addBox(x,y,z);
+          if (owner == mpi.rank) {
+            addBox(x,y,z,0);
+            addBox(x,y,z,mpi.size);
+          }
         }
+    // PING; PRINT(vertices.size()); 
+    // for (auto v : vertices) PRINT(v);
+    // PRINT(indices.size());
+    // for (auto v : indices) PRINT(v);
     
     faceIteration::Context *fit
       = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,

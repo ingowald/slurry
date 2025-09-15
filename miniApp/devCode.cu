@@ -20,6 +20,10 @@ namespace miniApp {
     vec3f c = mesh.vertices[idx.z];
     vec3f N = normalize(cross(b-a,c-a));
 
+    vec3f org = optixGetWorldRayOrigin();
+    if (prd.dbg) printf("face it hit at t=%f z=%f\n",
+                        optixGetRayTmax(),
+                        org.z+optixGetRayTmax());
     
     vec3f dir = optixGetWorldRayDirection();
     dir = normalize(dir);
@@ -53,13 +57,27 @@ namespace miniApp {
     vec3f dir = launchData.camera.dir;
     PerRayData prd;
     prd.dbg = (launchIdx == launchDims/2);
+    if (prd.dbg)
+      printf("DBG AT (%i %i) out of (%i %i)\n",
+             launchIdx.x,
+             launchIdx.y,
+             launchDims.x,
+             launchDims.y);
     prd.fragment.depth = INFINITY;
     prd.fragment.opacity = 0.f;
     prd.fragment.color = 0.f;
+    if (prd.dbg)
+      printf("launching ray (%f %f %f)+t*(%f %f %f)\n",
+             org.x,
+             org.y,
+             org.z,
+             dir.x,
+             dir.y,
+             dir.z);
 
     faceIteration::traceFrontToBack(launchData.faceIt.bvh,
                                     org,dir,0.f,INFINITY,
-                                    prd);
+                                    prd,prd.dbg);
    launchData.localFB[launchIdx.x+launchIdx.y*launchDims.x]
       = prd.fragment;
   }

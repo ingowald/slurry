@@ -29,7 +29,7 @@ add_executable(miniApp
 target_link_libraries(miniApp PUBLIC
   faceIteration
   compositing
-  embedded_devCode
+#  embedded_devCode
   stb
   )
  

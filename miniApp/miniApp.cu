@@ -11,7 +11,7 @@
 
 /* has to match the name of the file used in the embed_ptx cmake macro
    used in CMakeFile */
-extern "C" const char devCode_ptx[];
+// extern "C" const char devCode_ptx[];
 
 namespace miniApp {
 
@@ -146,11 +146,12 @@ namespace miniApp {
     // for (auto v : indices) PRINT(v);
     
     faceIteration::Context *fit
-      = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
-                                     sizeof(PerLaunchData),
-                                     devCode_ptx,
-                                     "faceIterationCallback",
-                                     "miniApp_perPixel");
+      = 0;
+      // = faceIteration::Context::init(gpuID,sizeof(UserMeshData),1,
+      //                                sizeof(PerLaunchData),
+      //                                devCode_ptx,
+      //                                "faceIterationCallback",
+      //                                "miniApp_perPixel");
     UserMeshData umd;
     umd.meshColor = owl::common::randomColor(mpi.rank+13);
     fit->setMesh(0,

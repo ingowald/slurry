@@ -14,16 +14,24 @@
 extern "C" const char devCode_ptx[];
 
 namespace miniApp {
+
+    struct Camera {
+      // for this simple example, let's use a orthogonal camera
+      vec3f org_00;
+      vec3f org_du;
+      vec3f org_dv;
+      vec3f dir;
+    };
   
   typedef compositing::Context<Fragment,FinalCompositingResult> CompositingContext;
   vec2i fbSize { 800, 800 };
 
-  void setCamera(PerLaunchData &launchData)
+  void setCamera(Camera &camera)
   {
-    launchData.camera.org_00 = vec3f(-1,-1,-1);
-    launchData.camera.org_du = vec3f(2,0,0);
-    launchData.camera.org_dv = vec3f(0,2,0);
-    launchData.camera.dir    = vec3f(0,0,1);
+    camera.org_00 = vec3f(-1,-1,-1);
+    camera.org_du = vec3f(2,0,0);
+    camera.org_dv = vec3f(0,2,0);
+    camera.dir    = vec3f(0,0,1);
   }
 
   /*! do whatever kind of compositing the app wants to do - input is a
@@ -156,6 +164,105 @@ namespace miniApp {
 }
 using namespace miniApp;
 
+
+__global__ void localRender(vec2i fbSize,
+                            Fragment *localFB,
+                            Camera camera,
+                            int rank,
+                            int size)
+{
+  vec2i launchIdx;
+  launchIdx.x = threadIdx.x+blockIdx.x*blockDim.x; if (launchIdx.x >= fbSize.x) return;
+  launchIdx.y = threadIdx.y+blockIdx.y*blockDim.y; if (launchIdx.y >= fbSize.y) return;
+  vec2i launchDims = fbSize;
+  
+  vec3f org = camera.org_00
+    + (launchIdx.x+.5f)/launchDims.x*camera.org_du
+    + (launchIdx.y+.5f)/launchDims.y*camera.org_dv;
+  vec3f dir = camera.dir;
+  // PerRayData prd;
+  Fragment fragment;
+  fragment.depth = INFINITY;
+  fragment.opacity = 0.f;
+  fragment.color = 0.f;
+
+  int N = size;
+  for (int iz=0;iz<N;iz++)
+    for (int iy=0;iy<N;iy++)
+      for (int ix=0;ix<N;ix++) {
+
+        size_t FNV_PRIME = 0x00000100000001b3ull;
+        
+        float rectSpacing =  2.f / size;
+        float rectSize     = 1.f / size;
+        float rectOffset  = -1.f + .25f*rectSize;
+        
+        float shiftPerDepth = .8f*rectSize / size;
+        
+    //     auto addBox = [&](int x, int y, int z, int dz)
+    // {
+    //   float x0 = rectOffset + x * rectSpacing + z * shiftPerDepth;
+    //   float y0 = rectOffset + y * rectSpacing + z * shiftPerDepth;
+    //   float x1 = x0 + rectSize; 
+    //   float y1 = y0 + rectSize;
+
+    //   int i0 = vertices.size();
+    //   vertices.push_back(vec3f(x0,y0,z+dz));
+    //   vertices.push_back(vec3f(x0,y1,z+dz));
+    //   vertices.push_back(vec3f(x1,y0,z+dz));
+    //   vertices.push_back(vec3f(x1,y1,z+dz));
+      
+    //   indices.push_back(vec3i(i0)+vec3i(0,1,3));
+    //   indices.push_back(vec3i(i0)+vec3i(0,3,2));
+    // };
+
+        auto boxTest = [&](float &t0, float &t1, box3f box)
+        {
+          vec3f t_lo = (box.lower - org) * rcp(dir);
+          vec3f t_hi = (box.upper - org) * rcp(dir);
+          vec3f t_nr = min(t_lo,t_hi);
+          vec3f t_fr = max(t_lo,t_hi);
+          t0 = max(t0,reduce_max(t_nr));
+          t1 = min(t1,reduce_min(t_fr));
+          return t0 <= t1;
+        };
+        auto anyHit = [&](float t) {
+          vec3f color = owl::common::randomColor(rank+1);
+          float opacity = .5f;
+          
+          fragment.color   += (1.f-fragment.opacity)*opacity*color;
+          fragment.opacity += (1.f-fragment.opacity)*opacity;
+        };
+        auto intersectBox = [&](int x, int y, int z, int dz) {
+          float x0 = rectOffset + x * rectSpacing + z * shiftPerDepth;
+          float y0 = rectOffset + y * rectSpacing + z * shiftPerDepth;
+          float x1 = x0 + rectSize; 
+          float y1 = y0 + rectSize;
+          float z0 = z+dz;
+          float z1 = z0;
+          box3f bb;
+          bb.lower = { x0,y0,z0 };
+          bb.upper = { x1,y1,z1 };
+
+          float t0 = 0.f;
+          float t1 = fragment.depth;
+          if (boxTest(t0,t1,bb)) {
+            anyHit(t0);
+          }
+        };
+        size_t hash = 0x12345;
+        hash = hash * FNV_PRIME ^ (ix+123);
+        hash = hash * FNV_PRIME ^ (iy+456);
+        int owner = (iz + hash) % size;
+        if (owner == rank) {
+          intersectBox(ix,iy,iz,0);
+          intersectBox(ix,iy,iz,size);
+        }
+      }
+  localFB[launchIdx.x+launchIdx.y*launchDims.x]
+    = fragment;
+}
+
 /*! just for this miniapp - convert to an rgba image to save test image to png */
 __global__
 void resultToPixel(uint32_t *pixels, FinalCompositingResult *result, int numPixels)
@@ -186,8 +293,9 @@ int main(int ac, char **av)
   int required = MPI_THREAD_MULTIPLE;
   int provided = 0;
   MPI_Init_thread(&ac,&av,required,&provided);
-  int rank;
+  int rank,size;
   MPI_Comm_rank(comm,&rank);
+  MPI_Comm_size(comm,&size);
     
   // =============================================================================
   // initialize out compositing context
@@ -200,17 +308,23 @@ int main(int ac, char **av)
   // =============================================================================
   // specify the geometry
   // =============================================================================
-  faceIteration::Context *fit = 
-    setScene(comm,gpuID);
+  // faceIteration::Context *fit = 
+  //   setScene(comm,gpuID);
     
   // =============================================================================
   // set up a launch, and issue launch to render local frame buffer
   // =============================================================================
-  PerLaunchData launchData;
-  launchData.localFB = localFB;
-  launchData.rank = rank;
-  setCamera(launchData);
-  fit->launch(fbSize,&launchData);
+  Camera camera;
+  // PerLaunchData launchData;
+  // launchData.localFB = localFB;
+  // launchData.rank = rank;
+  
+  // setCamera(launchData);
+  // fit->launch(fbSize,&launchData);
+  setCamera(camera);
+
+  localRender<<<divRoundUp(fbSize,vec2i(8)),vec2i(8)>>>
+    (fbSize,localFB,camera,rank,size);
 
   // =============================================================================
   // composite the local frame buffers
@@ -234,7 +348,7 @@ int main(int ac, char **av)
   // =============================================================================
   // and wind down in reverse order
   // =============================================================================
-  delete fit;
+  // delete fit;
   delete comp;
     
   MPI_Finalize();

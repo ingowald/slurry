@@ -9,11 +9,11 @@
 # binary form without having to explicitly load it from a text file at
 # runtime).
 #
-embed_ptx(
-  OUTPUT_TARGET      embedded_devCode
-  PTX_LINK_LIBRARIES faceIteration owl::owl
-  SOURCES            devCode.cu
-)
+#embed_ptx(
+#  OUTPUT_TARGET      embedded_devCode
+#  PTX_LINK_LIBRARIES faceIteration owl::owl
+#  SOURCES            devCode.cu
+#)
 
 # host- and pure CUDA (i.e., non-optix device programs) side of our
 # miniapp
